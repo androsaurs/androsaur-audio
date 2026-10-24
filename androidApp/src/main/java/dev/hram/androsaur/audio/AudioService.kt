@@ -62,8 +62,9 @@ class AudioService : Service() {
         try {
             if (Build.VERSION.SDK_INT >= 30) startForeground(1, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
             else startForeground(1, notification)
-        } catch (e: SecurityException) {
-            // Android 14+ refuses a microphone foreground service without the permission or from the background.
+        } catch (e: RuntimeException) {
+            // Android 12+ refuses a microphone foreground service started from the background
+            // (ForegroundServiceStartNotAllowedException, an IllegalStateException; on 14+ also SecurityException).
             Log.w(TAG, "cannot start as a microphone service", e)
             error = "foreground_start_refused"
             stopSelf()
