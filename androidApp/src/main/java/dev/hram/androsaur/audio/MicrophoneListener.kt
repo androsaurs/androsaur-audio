@@ -16,6 +16,8 @@ class MicrophoneListener(
     private val onWake: (heard: String?, levelDbfs: Double) -> Unit,
     private val onSilence: (silent: Boolean) -> Unit,
     private val onError: (code: String) -> Unit,
+    /** Elapsed-realtime time until which the engine must not hear the microphone (the assistant is speaking and would wake itself). */
+    private val mutedUntil: () -> Long = { 0L },
 ) {
     @Volatile var levelDbfs = AudioLevel.FLOOR_DBFS; private set
     @Volatile var frames = 0L; private set
@@ -43,6 +45,7 @@ class MicrophoneListener(
 
     private fun loop(record: AudioRecord) {
         val frame = ShortArray(engine.frameLength)
+        val silence = ShortArray(engine.frameLength)
         val gate = WakeGate(cooldownMs = 2000)
         // About two seconds of exact zeros means another app took the microphone.
         val detector = SilenceDetector(thresholdFrames = 2 * engine.sampleRate / engine.frameLength)
@@ -58,7 +61,9 @@ class MicrophoneListener(
                 detector.onFrame(AudioLevel.isDigitalSilence(frame))
                 if (detector.silent != wasSilent) { silent = detector.silent; onSilence(silent) }
                 val began = System.nanoTime()
-                val detected = engine.process(frame)
+                // While muted the engine gets silence instead, so what it heard before the speech ends cleanly and does not trigger afterwards.
+                val muted = SystemClock.elapsedRealtime() < mutedUntil()
+                val detected = engine.process(if (muted) silence else frame) && !muted
                 engineMsPerFrame += ((System.nanoTime() - began) / 1e6 - engineMsPerFrame) * 0.05
                 if (detected && gate.accept(SystemClock.elapsedRealtime())) onWake(engine.lastHeard, levelDbfs)
             }

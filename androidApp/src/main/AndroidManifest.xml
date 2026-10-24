@@ -9,10 +9,14 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-feature android:name="android.hardware.microphone" android:required="true" />
 
+    <!-- To list the installed speech engines (RHVoice, Google) on Android 11+. -->
+    <queries><intent><action android:name="android.intent.action.TTS_SERVICE" /></intent></queries>
+
     <application android:label="Androsaur Звук" android:theme="@android:style/Theme.Material.Light.NoActionBar" android:allowBackup="false" android:supportsRtl="true">
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
         </activity>
+        <activity android:name=".SpeechActivity" android:exported="false" />
         <!-- Hands the local server's access code to apps signed with the same key (see LinkProvider). -->
         <provider android:name=".LinkProvider" android:authorities="dev.hram.androsaur.audio.link" android:exported="true"
             android:permission="dev.hram.androsaur.audio.permission.CONTROL" />

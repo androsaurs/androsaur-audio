@@ -100,6 +100,16 @@ class PhoneServer(private val audio: AudioService, private val token: String) {
                     val problem = audio.configure(body.optString("engine").ifEmpty { null }, body.optString("phrase").ifEmpty { null })
                     json(socket, if (problem == null) 200 else 400, if (problem == null) JSONObject().put("ok", true) else JSONObject().put("error", problem))
                 }
+                "GET /speech" -> json(socket, 200, if (query["full"] == "1") audio.speech.status() else audio.speech.live())
+                "POST /speak" -> reply(socket, audio.speech.speak(body.optString("text"), if (body.has("speed")) body.optDouble("speed").toFloat() else null))
+                "POST /speak/stop" -> { audio.speech.stop(); json(socket, 200, JSONObject().put("ok", true)) }
+                "POST /speaker" -> reply(socket, audio.speech.configure(body.optString("engine").ifEmpty { null },
+                    if (body.has("speed")) body.optDouble("speed").toFloat() else null, if (body.has("threads")) body.optInt("threads") else null))
+                "GET /speech/bench" -> json(socket, 200, audio.speech.benchJson())
+                "POST /speech/bench" -> {
+                    if (body.optBoolean("cancel")) { audio.speech.benchCancel(); json(socket, 200, JSONObject().put("ok", true)) }
+                    else reply(socket, audio.speech.benchStart(body.optJSONArray("engines")?.let { a -> List(a.length()) { a.getString(it) } }, body.optBoolean("play")))
+                }
                 "POST /mcp" -> {
                     // Browsers always send Origin; MCP clients do not. Refusing it blocks DNS-rebinding and cross-site calls.
                     if ("origin" in headers) { json(socket, 403, JSONObject().put("error", "origin_not_allowed")); return }
@@ -114,6 +124,10 @@ class PhoneServer(private val audio: AudioService, private val token: String) {
             try { json(socket, 400, JSONObject().put("error", "bad_request")) } catch (_: Exception) { }
         }
     }
+
+    /** The answer to a command: 200 and ok, or 400 and the error code. */
+    private fun reply(socket: Socket, problem: String?) =
+        json(socket, if (problem == null) 200 else 400, if (problem == null) JSONObject().put("ok", true) else JSONObject().put("error", problem))
 
     private fun json(socket: Socket, code: Int, json: JSONObject) = respond(socket, code, json.toString().toByteArray(), emptyMap(), "application/json")
     private fun respond(socket: Socket, code: Int, bytes: ByteArray, extra: Map<String, String> = emptyMap(), type: String = "application/json") {

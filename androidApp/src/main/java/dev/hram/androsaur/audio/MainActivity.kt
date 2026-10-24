@@ -66,6 +66,7 @@ class MainActivity : ComponentActivity() {
                         Text(status, style = MaterialTheme.typography.titleMedium)
                         WakeIndicator(service)
                         EnginePicker(service)
+                        OutlinedButton(onClick = { startActivity(Intent(this@MainActivity, SpeechActivity::class.java)) }, modifier = Modifier.fillMaxWidth()) { Text("Голос: настройка и проверка") }
                         Button(onClick = { requestStart() }, modifier = Modifier.fillMaxWidth()) { Text("Начать слушать") }
                         OutlinedButton(onClick = {
                             manuallyStopped = true
