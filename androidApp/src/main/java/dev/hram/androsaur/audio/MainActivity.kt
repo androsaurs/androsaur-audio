@@ -27,6 +27,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.lerp
+import dev.hram.androsaur.audio.wake.WakePhrase
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.compose.ui.graphics.Color
@@ -61,7 +62,7 @@ class MainActivity : ComponentActivity() {
                     Column(Modifier.verticalScroll(rememberScrollState()).padding(28.dp).statusBarsPadding().navigationBarsPadding(), verticalArrangement = Arrangement.spacedBy(24.dp)) {
                         Text("ANDROSAUR", fontSize = 14.sp)
                         Text("Звук", style = MaterialTheme.typography.headlineLarge)
-                        Text("Каркас · wake-word «Привет, Петя» пока не подключён")
+                        PhraseLine(service)
                         Text(status, style = MaterialTheme.typography.titleMedium)
                         WakeIndicator(service)
                         EnginePicker(service)
@@ -183,4 +184,17 @@ private fun EnginePicker(service: AudioService?) {
             else OutlinedButton(onClick = { Thread { service.setEngine(id) }.start() }, modifier = Modifier.fillMaxWidth()) { Text(id) }
         }
     }
+}
+
+/** The current wake phrase; it can be changed through the API at any time, so it is re-read while the screen is open. */
+@Composable
+private fun PhraseLine(service: AudioService?) {
+    var shown by remember { mutableStateOf("") }
+    LaunchedEffect(service) {
+        while (true) {
+            shown = service?.phrase?.let { WakePhrase.display(it) } ?: ""
+            delay(1000)
+        }
+    }
+    Text(if (shown.isEmpty()) "Wake-word: сервис не запущен" else "Wake-word: «${shown.replaceFirstChar { it.uppercase() }}»")
 }

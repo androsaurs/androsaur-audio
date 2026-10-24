@@ -90,4 +90,11 @@ class PhraseMatcherTest {
         assertNull(EngineSpec.parse("mww:../secret"))
         assertNull(EngineSpec.parse("mww:Okay"))
     }
+
+    @Test fun toleranceOfOneKeepsSimilarCommonWordsOut() {
+        val matcher = PhraseMatcher("железяка~1")
+        assertTrue(matcher.matches("железяка"))
+        assertTrue(matcher.matches("железяки"))
+        listOf("железа", "железо", "железы", "железная").forEach { assertFalse(matcher.matches(it), it) }
+    }
 }
