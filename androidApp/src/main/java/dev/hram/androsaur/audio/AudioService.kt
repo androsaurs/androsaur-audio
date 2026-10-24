@@ -34,6 +34,20 @@ class AudioService : Service() {
     private var server: PhoneServer? = null
     val speech by lazy { SpeechController(this, prefs) { type, data -> record(type, *data) } }
     val notes by lazy { NoteController(this, { microphone }, speech) { type, data -> record(type, *data) } }
+    val recipients by lazy { RecipientBook(prefs) }
+    /** Who the camera sees now, pushed by the main app; a note left by voice is filed as «from» this person while the push is fresh. */
+    @Volatile private var personName: String? = null
+    @Volatile private var personAt = 0L
+    /** What the assistant waits for or does besides speaking, for the face: `command` (listening for a command), `recording` (a note is being recorded), `note` (a note plays), or empty. */
+    fun mode(): String = when {
+        notes.state == "recording" -> "recording"
+        notes.state == "playing" -> "note"
+        commands.listening -> "command"
+        else -> ""
+    }
+    fun setPerson(name: String?) { personName = name?.trim()?.ifEmpty { null }; personAt = SystemClock.elapsedRealtime() }
+    private fun person(): String? = personName?.takeIf { SystemClock.elapsedRealtime() - personAt < PERSON_FRESH_MS }
+    val commands by lazy { CommandListener({ words -> factory.commandRecognizer(words) }, { microphone }, recipients, speech, notes, ::person) { type, data -> record(type, *data) } }
     private val nsd by lazy { NsdAdvertiser(this) }
     @Volatile private var lastWakeAt = 0L
     private val wakes = java.util.concurrent.atomic.AtomicLong()
@@ -179,6 +193,7 @@ class AudioService : Service() {
         record("wake_word", *data.toTypedArray())
         lastWakeText = listOfNotNull(engineId, heard).joinToString(" · ")
         wakes.incrementAndGet()
+        commands.open()
         lastWakeAt = SystemClock.elapsedRealtime()
     }
 
@@ -213,6 +228,7 @@ class AudioService : Service() {
         }
         json.put("speech", JSONObject().put("speaker", speech.status().optString("speaker")).put("state", speech.status().optString("state")).put("speaking", speech.mouth.speaking))
         json.put("notes", notes.status())
+        json.put("commands", JSONObject().put("listening", commands.listening).put("recipients", recipients.all().size))
         if (lastWakeAt != 0L) json.put("sinceLastWakeMs", SystemClock.elapsedRealtime() - lastWakeAt)
         error?.let { json.put("error", it) }
         return json
@@ -223,5 +239,6 @@ class AudioService : Service() {
         private const val KEY_ENGINE = "engine"
         private const val KEY_PHRASE = "phrase"
         private const val TAG = "AndrosaurAudio"
+        private const val PERSON_FRESH_MS = 15_000L
     }
 }

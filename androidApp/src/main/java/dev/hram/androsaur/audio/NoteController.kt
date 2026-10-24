@@ -37,7 +37,14 @@ class NoteController(
     private val lock = Any()
 
     /** Starts recording a note for [toText]; the beep says when to talk. Returns an error code, or null when it has started. */
-    fun startRecording(toText: String, fromText: String?, maxSeconds: Int?): String? {
+    /** What the controller is doing: idle, recording or playing. */
+    val state: String get() = phase
+
+    /**
+     * [beep] says when to talk with a sound; a caller that tells it in words passes false. [onDone] is called when the recording
+     * ends, with null when a note was saved or the reason it was not (`no_speech`, `too_short`, `microphone_lost`, ...).
+     */
+    fun startRecording(toText: String, fromText: String?, maxSeconds: Int?, beep: Boolean = true, onDone: ((String?) -> Unit)? = null): String? {
         val to = Recipient.normalize(toText) ?: return "empty_recipient"
         if (to.length > MAX_NAME) return "recipient_too_long"
         val from = fromText?.trim().orEmpty().take(MAX_NAME)
@@ -49,21 +56,21 @@ class NoteController(
             phase = "recording"; stopRequested = false
         }
         micMutedUntil = Long.MAX_VALUE
-        Thread({ recordNote(mic, to, from, limitMs) }, "notes-record").start()
+        Thread({ recordNote(mic, to, from, limitMs, beep, onDone) }, "notes-record").start()
         return null
     }
 
     /** Ends the recording now; what was said so far is kept. */
     fun stopRecording(): Boolean { if (phase != "recording") return false; stopRequested = true; return true }
 
-    private fun recordNote(mic: MicrophoneListener, to: String, from: String, limitMs: Long) {
+    private fun recordNote(mic: MicrophoneListener, to: String, from: String, limitMs: Long, beep: Boolean, onDone: ((String?) -> Unit)?) {
         record("note_recording_started", arrayOf("to" to to))
         var reason: String? = null
         var peakText = ""
         var thresholdText = ""
         try {
             speech.stop()
-            beep()
+            if (beep) beep()
             // The beep and its tail die out before the recorder listens, so they are not in the note.
             Thread.sleep(BEEP_TAIL_MS)
             val gate = RecordingGate(mic.frameMs, maxMs = limitMs)
@@ -109,6 +116,7 @@ class NoteController(
             if (reason != null) record("note_record_failed", arrayOf("reason" to reason, "peakDbfs" to peakText, "thresholdDbfs" to thresholdText))
             micMutedUntil = SystemClock.elapsedRealtime() + SpeechController.MUTE_TAIL_MS
             phase = "idle"
+            onDone?.let { runCatching { it(reason) } }
         }
     }
 

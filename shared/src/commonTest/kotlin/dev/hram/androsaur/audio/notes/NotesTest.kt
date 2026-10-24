@@ -98,6 +98,14 @@ class NotesTest {
         assertEquals(2000L, gate.speechEndMs)
     }
 
+    @Test fun autoGainRaisesQuietSpeechAndLeavesLoudAlone() {
+        val gain = AutoGain()
+        val quiet = gain.apply(ShortArray(512) { if (it % 2 == 0) 300 else -300 })
+        assertTrue(quiet.maxOf { it.toInt() } in 5000..7000)
+        val loud = AutoGain().apply(ShortArray(512) { if (it % 2 == 0) 20000 else -20000 })
+        assertEquals(20000, loud.maxOf { it.toInt() })
+    }
+
     @Test fun wavHeaderDescribesTheSound() {
         val h = Wav.header(32000, 16000)
         assertEquals(44, h.size)

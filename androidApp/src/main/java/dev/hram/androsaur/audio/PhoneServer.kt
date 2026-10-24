@@ -100,7 +100,7 @@ class PhoneServer(private val audio: AudioService, private val token: String) {
                     val problem = audio.configure(body.optString("engine").ifEmpty { null }, body.optString("phrase").ifEmpty { null })
                     json(socket, if (problem == null) 200 else 400, if (problem == null) JSONObject().put("ok", true) else JSONObject().put("error", problem))
                 }
-                "GET /speech" -> json(socket, 200, if (query["full"] == "1") audio.speech.status() else audio.speech.live())
+                "GET /speech" -> json(socket, 200, (if (query["full"] == "1") audio.speech.status() else audio.speech.live()).put("mode", audio.mode()))
                 "POST /speak" -> reply(socket, audio.speech.speak(body.optString("text"), if (body.has("speed")) body.optDouble("speed").toFloat() else null))
                 "POST /speak/stop" -> { audio.speech.stop(); json(socket, 200, JSONObject().put("ok", true)) }
                 "POST /speaker" -> reply(socket, audio.speech.configure(body.optString("engine").ifEmpty { null },
@@ -117,6 +117,20 @@ class PhoneServer(private val audio: AudioService, private val token: String) {
                 "POST /notes/play" -> reply(socket, audio.notes.play(body.optString("id").ifEmpty { null }, body.optString("to").ifEmpty { null }, body.optBoolean("announce", true)))
                 "POST /notes/play/stop" -> { audio.notes.stopPlaying(); json(socket, 200, JSONObject().put("ok", true)) }
                 "POST /notes/delete" -> json(socket, 200, JSONObject().put("ok", audio.notes.delete(body.optString("id"))))
+                "GET /recipients" -> json(socket, 200, JSONObject().put("recipients", audio.recipients.toJson()))
+                "POST /recipients" -> {
+                    val list = body.optJSONArray("recipients")
+                    if (list != null) {
+                        val parsed = List(list.length()) { i -> list.getJSONObject(i).let { o ->
+                            dev.hram.androsaur.audio.command.Recipient(o.getString("id"), o.optJSONArray("forms")?.let { f -> List(f.length()) { f.getString(it) } } ?: emptyList(), o.optString("person").ifEmpty { null }) } }
+                        reply(socket, audio.recipients.replace(parsed))
+                    } else {
+                        val names = body.optJSONArray("addNames")
+                        json(socket, 200, JSONObject().put("added", if (names == null) 0 else audio.recipients.addNames(List(names.length()) { names.getString(it) })))
+                    }
+                }
+                "POST /context" -> { audio.setPerson(body.optString("person")); json(socket, 200, JSONObject().put("ok", true)) }
+                "POST /command" -> json(socket, 200, audio.commands.run(body.optString("text")))
                 "POST /mcp" -> {
                     // Browsers always send Origin; MCP clients do not. Refusing it blocks DNS-rebinding and cross-site calls.
                     if ("origin" in headers) { json(socket, 403, JSONObject().put("error", "origin_not_allowed")); return }

@@ -27,6 +27,8 @@ class MicrophoneListener(
     /** Frame duration, for comparing engine cost against real time. */
     val frameMs: Double get() = engine.frameLength * 1000.0 / engine.sampleRate
     /** Receives a copy of every frame while set (the voice-note recorder); frames are the engine's size and rate. */
+    /** Receives a copy of every frame while a command is awaited; the wake engine rests meanwhile. */
+    @Volatile var commandTap: ((ShortArray) -> Unit)? = null
     @Volatile var tap: ((ShortArray) -> Unit)? = null
     /** The sample rate of the frames given to [tap]. */
     val sampleRate: Int get() = engine.sampleRate
@@ -62,12 +64,13 @@ class MicrophoneListener(
                 frames++
                 levelDbfs = AudioLevel.dbfs(frame)
                 tap?.invoke(frame.copyOf())
+                val commanding = commandTap?.also { it(frame.copyOf()) } != null
                 val wasSilent = detector.silent
                 detector.onFrame(AudioLevel.isDigitalSilence(frame))
                 if (detector.silent != wasSilent) { silent = detector.silent; onSilence(silent) }
                 val began = System.nanoTime()
                 // While muted the engine gets silence instead, so what it heard before the speech ends cleanly and does not trigger afterwards.
-                val muted = SystemClock.elapsedRealtime() < mutedUntil()
+                val muted = commanding || SystemClock.elapsedRealtime() < mutedUntil()
                 val detected = engine.process(if (muted) silence else frame) && !muted
                 engineMsPerFrame += ((System.nanoTime() - began) / 1e6 - engineMsPerFrame) * 0.05
                 if (detected && gate.accept(SystemClock.elapsedRealtime())) onWake(engine.lastHeard, levelDbfs)

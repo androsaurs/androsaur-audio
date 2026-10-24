@@ -146,3 +146,21 @@ object Loudness {
         return ShortArray(cut.size) { (cut[it] * gain).toInt().coerceIn(-32768, 32767).toShort() }
     }
 }
+
+/**
+ * Automatic gain for a speech recognizer: this phone's microphone gives ordinary speech at a few hundred out of 32768, which
+ * recognizers read poorly. Follows the loudest recent frame and raises the level toward [TARGET_PEAK]; never lowers it.
+ */
+class AutoGain(private val maxGain: Double = 20.0, private val decay: Double = 0.97) {
+    private var envelope = 1.0
+
+    fun apply(frame: ShortArray): ShortArray {
+        var peak = 0
+        for (s in frame) { val a = if (s < 0) -s.toInt() else s.toInt(); if (a > peak) peak = a }
+        envelope = maxOf(peak.toDouble(), envelope * decay, 1.0)
+        val gain = (TARGET_PEAK / envelope).coerceIn(1.0, maxGain)
+        return ShortArray(frame.size) { (frame[it] * gain).toInt().coerceIn(-32768, 32767).toShort() }
+    }
+
+    companion object { const val TARGET_PEAK = 12000.0 }
+}

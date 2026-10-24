@@ -30,7 +30,7 @@ class McpEndpoint(private val audio: AudioService) {
     private fun tools() = JSONArray()
         .put(tool("status", "Service state: whether the microphone is being read, the wake-word engine (id, state loading/ready/failed, load time, cost per audio frame in ms against the frame length), input level in dBFS, whether the microphone is silent (another app may hold it) and the last error.",
             schema(), readOnly = true))
-        .put(tool("recent_events", "Events after the given id (service_started, engine_ready, engine_failed, wake_word, speech_started, speech_finished, speech_failed, note_recording_started, note_recorded, note_record_failed, note_playing, note_played, note_play_failed, note_deleted, speaker_ready, speaker_failed, microphone_silent, microphone_recovered, error), oldest first, at most 100.",
+        .put(tool("recent_events", "Events after the given id (service_started, engine_ready, engine_failed, wake_word, speech_started, speech_finished, speech_failed, note_recording_started, note_recorded, note_record_failed, note_playing, note_played, note_play_failed, note_deleted, command_listening, command_heard, command_note, command_timeout, command_failed, speaker_ready, speaker_failed, microphone_silent, microphone_recovered, error), oldest first, at most 100.",
             schema(props = mapOf("after" to prop("integer", "Return events with an id greater than this. Default 0."))), readOnly = true))
         .put(tool("set_engine", "Switch the wake-word engine and/or change the wake phrase; both are remembered. Pass engine, phrase or both. Loading happens in the background: poll status until engine.state is ready (or failed). engine.available in status lists the valid ids; none detects nothing, vosk recognizes the phrase with a small Russian speech model. The phrase applies to vosk and vosk-grammar (microWakeWord models have a fixed phrase); status.phrase shows the current one. Errors: unknown_engine, engine_not_available, invalid_phrase.",
             schema(props = mapOf(
@@ -59,8 +59,22 @@ class McpEndpoint(private val audio: AudioService) {
                 "announce" to prop("boolean", "Say who it is from first. Default true.")))))
         .put(tool("stop_note", "Cut the note that is playing short (it stays waiting).", schema()))
         .put(tool("delete_note", "Delete a voice note by id.", schema(props = mapOf("id" to prop("string", "Note id.")), required = listOf("id"))))
+        .put(tool("list_recipients", "Who a voice note can be left for by voice, in tie-breaking order: id (what the person is called, e.g. \"жена\" or a name), forms (extra spoken forms), person (whom notes for this recipient are filed under, default the id).",
+            schema(), readOnly = true))
+        .put(tool("set_recipients", "Replace the list of people notes can be left for by voice. After the wake word the assistant listens for «передай жене…», «скажи Маше…», «оставь записку для мамы»: the name may be in any case, it needs only to be close to an id or a form. Put roles before names: when a word fits two entries the earlier one wins. Errors: too_many_recipients (40), invalid_recipient.",
+            schema(props = mapOf("recipients" to recipientsSchema), required = listOf("recipients"))))
+        .put(tool("run_command", "Carry out a spoken command given as text, as if it was heard after the wake word (e.g. \"передай жене\"): the assistant repeats whom the note is for, beeps and records it. Returns what was understood.",
+            schema(props = mapOf("text" to prop("string", "The command.")), required = listOf("text"))))
         .put(tool("simulate_wake", "Raise a wake_word event as if the phrase was heard. For testing listeners before a real engine is wired in.",
             schema()))
+
+    private val recipientsSchema: JSONObject = run {
+        val entry = JSONObject().put("type", "object").put("properties", JSONObject()
+            .put("id", prop("string", "Name or role."))
+            .put("forms", JSONObject().put("type", "array").put("items", JSONObject().put("type", "string")))
+            .put("person", prop("string", "Whom notes for it are filed under (the name the camera knows).")))
+        JSONObject().put("type", "array").put("description", "Entries {id, forms?, person?}.").put("items", entry)
+    }
 
     private fun call(name: String, args: JSONObject): JSONObject = when (name) {
         "status" -> result(audio.status())
@@ -106,6 +120,14 @@ class McpEndpoint(private val audio: AudioService) {
         }
         "stop_note" -> { audio.notes.stopPlaying(); result(JSONObject().put("ok", true)) }
         "delete_note" -> result(JSONObject().put("ok", audio.notes.delete(args.optString("id"))))
+        "list_recipients" -> result(JSONObject().put("recipients", audio.recipients.toJson()))
+        "set_recipients" -> {
+            val list = args.optJSONArray("recipients") ?: JSONArray()
+            val problem = audio.recipients.replace(List(list.length()) { i -> list.getJSONObject(i).let { o ->
+                dev.hram.androsaur.audio.command.Recipient(o.getString("id"), o.optJSONArray("forms")?.let { f -> List(f.length()) { f.getString(it) } } ?: emptyList(), o.optString("person").ifEmpty { null }) } })
+            result(if (problem == null) JSONObject().put("ok", true) else JSONObject().put("error", problem), error = problem != null)
+        }
+        "run_command" -> result(audio.commands.run(args.optString("text")))
         "simulate_wake" -> { audio.simulateWake(); result(JSONObject().put("ok", true)) }
         else -> result(JSONObject().put("error", "unknown_tool"), error = true)
     }
