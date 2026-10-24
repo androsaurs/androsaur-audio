@@ -97,7 +97,7 @@ class PhoneServer(private val audio: AudioService, private val token: String) {
                     })))
                 }
                 "POST /engine" -> {
-                    val problem = audio.setEngine(body.optString("engine"))
+                    val problem = audio.configure(body.optString("engine").ifEmpty { null }, body.optString("phrase").ifEmpty { null })
                     json(socket, if (problem == null) 200 else 400, if (problem == null) JSONObject().put("ok", true) else JSONObject().put("error", problem))
                 }
                 "POST /mcp" -> {

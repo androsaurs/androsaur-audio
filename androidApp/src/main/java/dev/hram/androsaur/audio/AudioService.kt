@@ -17,6 +17,7 @@ import dev.hram.androsaur.audio.events.AudioEvent
 import dev.hram.androsaur.audio.events.EventLog
 import dev.hram.androsaur.audio.wake.EngineSpec
 import dev.hram.androsaur.audio.wake.NoWakeWordEngine
+import dev.hram.androsaur.audio.wake.WakePhrase
 import dev.hram.androsaur.audio.wake.WakeWordEngine
 import org.json.JSONArray
 import org.json.JSONObject
@@ -50,14 +51,14 @@ class AudioService : Service() {
     private var engineLoadMs = 0L
     private var destroyed = false
 
+    /** The wake phrase in [WakePhrase] syntax; used by the vosk engines (microWakeWord models have a fixed phrase). */
+    val phrase: String get() = prefs.getString(KEY_PHRASE, null)?.let { WakePhrase.normalize(it) } ?: WakePhrase.DEFAULT
+
     override fun onCreate() {
         super.onCreate()
         val manager = getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(NotificationChannel(CHANNEL, "Androsaur Звук", NotificationManager.IMPORTANCE_LOW))
-        val pending = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
-        val notification = Notification.Builder(this, CHANNEL).setContentTitle("Androsaur Звук")
-            .setContentText("Слушаю · wake-word «Привет, Петя»")
-            .setSmallIcon(android.R.drawable.ic_btn_speak_now).setContentIntent(pending).setOngoing(true).build()
+        val notification = notification()
         try {
             if (Build.VERSION.SDK_INT >= 30) startForeground(1, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
             else startForeground(1, notification)
@@ -82,6 +83,13 @@ class AudioService : Service() {
         }
     }
 
+    private fun notification(): Notification {
+        val pending = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
+        return Notification.Builder(this, CHANNEL).setContentTitle("Androsaur Звук")
+            .setContentText("Слушаю · wake-word «${WakePhrase.display(phrase).replaceFirstChar { it.uppercase() }}»")
+            .setSmallIcon(android.R.drawable.ic_btn_speak_now).setContentIntent(pending).setOngoing(true).build()
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
     override fun onBind(intent: Intent?) = binder
 
@@ -102,15 +110,25 @@ class AudioService : Service() {
     fun availableEngines(): List<String> = factory.available()
 
     /** Switches the wake-word engine and remembers the choice. Returns an error code, or null when loading has started. */
-    fun setEngine(id: String): String? {
-        val wanted = EngineSpec.parse(id) ?: return "unknown_engine"
-        if (id !in availableEngines()) return "engine_not_available"
-        prefs.edit().putString(KEY_ENGINE, wanted.id).apply()
+    fun setEngine(id: String): String? = configure(id, null)
+
+    /**
+     * Changes the engine, the wake phrase, or both, validating everything before anything is stored.
+     * Returns an error code, or null when the change was accepted (the engine reloads in the background).
+     */
+    fun configure(engineId: String?, phraseText: String?): String? {
+        val wanted = engineId?.let { EngineSpec.parse(it) ?: return "unknown_engine" } ?: synchronized(engineLock) { spec }
+        if (engineId != null && engineId !in availableEngines()) return "engine_not_available"
+        val newPhrase = phraseText?.let { WakePhrase.normalize(it) ?: return "invalid_phrase" }
+        prefs.edit().putString(KEY_ENGINE, wanted.id).apply { if (newPhrase != null) putString(KEY_PHRASE, newPhrase) }.apply()
+        if (newPhrase != null) getSystemService(NotificationManager::class.java).notify(1, notification())
         activate(wanted)
         return null
     }
 
     private fun activate(wanted: EngineSpec) {
+        val usedPhrase = phrase
+        val keywords = usedPhrase.split(' ').map { it.substringBefore('|').substringBefore('~').take(4) }
         val mine = synchronized(engineLock) {
             if (destroyed) return
             microphone?.stop(); microphone = null
@@ -120,7 +138,12 @@ class AudioService : Service() {
         }
         Thread({
             val began = SystemClock.elapsedRealtime()
-            val built = runCatching { factory.create(wanted) }
+            val built = runCatching {
+                factory.create(wanted, usedPhrase) { text ->
+                    // Only utterances containing a start of a phrase word are kept: enough to tune the match without logging speech.
+                    if (keywords.any { it in text }) record("heard", "text" to text)
+                }
+            }
             val tookMs = SystemClock.elapsedRealtime() - began
             synchronized(engineLock) {
                 if (mine != generation) { built.getOrNull()?.close(); return@synchronized }
@@ -167,7 +190,7 @@ class AudioService : Service() {
 
     fun status(): JSONObject {
         val json = JSONObject().put("bootId", bootId).put("version", BuildConfig.VERSION_NAME)
-            .put("latestEventId", synchronized(log) { log.latestId })
+            .put("latestEventId", synchronized(log) { log.latestId }).put("phrase", phrase)
         synchronized(engineLock) {
             val mic = microphone
             json.put("listening", mic != null && error == null)
@@ -190,6 +213,7 @@ class AudioService : Service() {
     companion object {
         private const val CHANNEL = "audio"
         private const val KEY_ENGINE = "engine"
+        private const val KEY_PHRASE = "phrase"
         private const val TAG = "AndrosaurAudio"
     }
 }
