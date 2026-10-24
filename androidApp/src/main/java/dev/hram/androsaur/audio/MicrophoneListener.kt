@@ -26,6 +26,10 @@ class MicrophoneListener(
     @Volatile var engineMsPerFrame = 0.0; private set
     /** Frame duration, for comparing engine cost against real time. */
     val frameMs: Double get() = engine.frameLength * 1000.0 / engine.sampleRate
+    /** Receives a copy of every frame while set (the voice-note recorder); frames are the engine's size and rate. */
+    @Volatile var tap: ((ShortArray) -> Unit)? = null
+    /** The sample rate of the frames given to [tap]. */
+    val sampleRate: Int get() = engine.sampleRate
     @Volatile private var stopped = false
     private var thread: Thread? = null
 
@@ -57,6 +61,7 @@ class MicrophoneListener(
                 if (read < frame.size) continue
                 frames++
                 levelDbfs = AudioLevel.dbfs(frame)
+                tap?.invoke(frame.copyOf())
                 val wasSilent = detector.silent
                 detector.onFrame(AudioLevel.isDigitalSilence(frame))
                 if (detector.silent != wasSilent) { silent = detector.silent; onSilence(silent) }

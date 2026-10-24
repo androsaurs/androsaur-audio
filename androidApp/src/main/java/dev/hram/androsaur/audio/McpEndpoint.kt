@@ -30,7 +30,7 @@ class McpEndpoint(private val audio: AudioService) {
     private fun tools() = JSONArray()
         .put(tool("status", "Service state: whether the microphone is being read, the wake-word engine (id, state loading/ready/failed, load time, cost per audio frame in ms against the frame length), input level in dBFS, whether the microphone is silent (another app may hold it) and the last error.",
             schema(), readOnly = true))
-        .put(tool("recent_events", "Events after the given id (service_started, engine_ready, engine_failed, wake_word, speech_started, speech_finished, speech_failed, speaker_ready, speaker_failed, microphone_silent, microphone_recovered, error), oldest first, at most 100.",
+        .put(tool("recent_events", "Events after the given id (service_started, engine_ready, engine_failed, wake_word, speech_started, speech_finished, speech_failed, note_recording_started, note_recorded, note_record_failed, note_playing, note_played, note_play_failed, note_deleted, speaker_ready, speaker_failed, microphone_silent, microphone_recovered, error), oldest first, at most 100.",
             schema(props = mapOf("after" to prop("integer", "Return events with an id greater than this. Default 0."))), readOnly = true))
         .put(tool("set_engine", "Switch the wake-word engine and/or change the wake phrase; both are remembered. Pass engine, phrase or both. Loading happens in the background: poll status until engine.state is ready (or failed). engine.available in status lists the valid ids; none detects nothing, vosk recognizes the phrase with a small Russian speech model. The phrase applies to vosk and vosk-grammar (microWakeWord models have a fixed phrase); status.phrase shows the current one. Errors: unknown_engine, engine_not_available, invalid_phrase.",
             schema(props = mapOf(
@@ -47,6 +47,18 @@ class McpEndpoint(private val audio: AudioService) {
             schema(props = mapOf("start" to prop("boolean", "Begin a run."), "cancel" to prop("boolean", "Stop the run."),
                 "engines" to JSONObject().put("type", "array").put("items", JSONObject().put("type", "string")).put("description", "Engine ids to measure. Default: all available."),
                 "play" to prop("boolean", "Also say the phrases aloud. Default false.")))))
+        .put(tool("record_note", "Leave a voice note for a person: a beep sounds, then the microphone records what is said until a pause of about a second and a half (or the limit), and the note waits for the recipient. Returns at once; watch note_recorded / note_record_failed in recent_events. Errors at start: empty_recipient, recipient_too_long, invalid_max_seconds, microphone_unavailable, busy:<what>. Failure reasons in the event: no_speech (nobody spoke within 6 s), too_short. Notes are stored as sound on the phone (never as text); a note nobody heard is dropped after 14 days, a heard one after a day.",
+            schema(props = mapOf("to" to prop("string", "Who the note is for, a name or a role such as \"жена\"; compared ignoring case. Use the same string when playing."),
+                "from" to prop("string", "Who leaves it (e.g. the name the camera recognised); said when the note is played."),
+                "maxSeconds" to prop("integer", "Longest message, 3-120. Default 60.")), required = listOf("to"))))
+        .put(tool("stop_recording", "End the running note recording now; what was said so far is kept.", schema()))
+        .put(tool("list_notes", "Voice notes (without the sound): id, to, from, createdAtMs, durationMs, heard. Oldest first.",
+            schema(props = mapOf("to" to prop("string", "Only notes for this person."), "pending" to prop("boolean", "Only notes nobody has heard yet."))), readOnly = true))
+        .put(tool("play_note", "Play a voice note aloud: the one with id, or the oldest waiting for the person in to. First says «Тебе сообщение от <from>» unless announce is false. A note played to the end is marked heard (it can still be played by id for a day). Returns at once; watch note_played / note_play_failed. Errors: not_found, no_notes, nothing_to_play, empty_recipient, busy:<what>.",
+            schema(props = mapOf("id" to prop("string", "Note id."), "to" to prop("string", "Play the oldest waiting note for this person."),
+                "announce" to prop("boolean", "Say who it is from first. Default true.")))))
+        .put(tool("stop_note", "Cut the note that is playing short (it stays waiting).", schema()))
+        .put(tool("delete_note", "Delete a voice note by id.", schema(props = mapOf("id" to prop("string", "Note id.")), required = listOf("id"))))
         .put(tool("simulate_wake", "Raise a wake_word event as if the phrase was heard. For testing listeners before a real engine is wired in.",
             schema()))
 
@@ -82,6 +94,18 @@ class McpEndpoint(private val audio: AudioService) {
             }
             else -> result(audio.speech.benchJson())
         }
+        "record_note" -> {
+            val problem = audio.notes.startRecording(args.optString("to"), args.optString("from").ifEmpty { null }, if (args.has("maxSeconds")) args.optInt("maxSeconds") else null)
+            result(if (problem == null) JSONObject().put("ok", true) else JSONObject().put("error", problem), error = problem != null)
+        }
+        "stop_recording" -> result(JSONObject().put("ok", audio.notes.stopRecording()))
+        "list_notes" -> result(JSONObject().put("notes", audio.notes.list(args.optString("to").ifEmpty { null }, args.optBoolean("pending"))))
+        "play_note" -> {
+            val problem = audio.notes.play(args.optString("id").ifEmpty { null }, args.optString("to").ifEmpty { null }, args.optBoolean("announce", true))
+            result(if (problem == null) JSONObject().put("ok", true) else JSONObject().put("error", problem), error = problem != null)
+        }
+        "stop_note" -> { audio.notes.stopPlaying(); result(JSONObject().put("ok", true)) }
+        "delete_note" -> result(JSONObject().put("ok", audio.notes.delete(args.optString("id"))))
         "simulate_wake" -> { audio.simulateWake(); result(JSONObject().put("ok", true)) }
         else -> result(JSONObject().put("error", "unknown_tool"), error = true)
     }

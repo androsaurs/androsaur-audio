@@ -33,6 +33,7 @@ class AudioService : Service() {
     private val factory by lazy { EngineFactory(this) }
     private var server: PhoneServer? = null
     val speech by lazy { SpeechController(this, prefs) { type, data -> record(type, *data) } }
+    val notes by lazy { NoteController(this, { microphone }, speech) { type, data -> record(type, *data) } }
     private val nsd by lazy { NsdAdvertiser(this) }
     @Volatile private var lastWakeAt = 0L
     private val wakes = java.util.concurrent.atomic.AtomicLong()
@@ -164,7 +165,7 @@ class AudioService : Service() {
                     onWake = { heard, level -> onWake(wanted.id, heard, level) },
                     onSilence = { silent -> record(if (silent) "microphone_silent" else "microphone_recovered") },
                     onError = { code -> error = code; record("error", "code" to code) },
-                    mutedUntil = { speech.micMutedUntil },
+                    mutedUntil = { maxOf(speech.micMutedUntil, notes.micMutedUntil) },
                 ).also { it.start() }
                 if (ready != null) record("engine_ready", "engine" to wanted.id, "loadMs" to tookMs.toString())
             }
@@ -211,6 +212,7 @@ class AudioService : Service() {
             json.put("engine", engineJson)
         }
         json.put("speech", JSONObject().put("speaker", speech.status().optString("speaker")).put("state", speech.status().optString("state")).put("speaking", speech.mouth.speaking))
+        json.put("notes", notes.status())
         if (lastWakeAt != 0L) json.put("sinceLastWakeMs", SystemClock.elapsedRealtime() - lastWakeAt)
         error?.let { json.put("error", it) }
         return json

@@ -110,6 +110,13 @@ class PhoneServer(private val audio: AudioService, private val token: String) {
                     if (body.optBoolean("cancel")) { audio.speech.benchCancel(); json(socket, 200, JSONObject().put("ok", true)) }
                     else reply(socket, audio.speech.benchStart(body.optJSONArray("engines")?.let { a -> List(a.length()) { a.getString(it) } }, body.optBoolean("play")))
                 }
+                "GET /notes" -> json(socket, 200, JSONObject().put("notes", audio.notes.list(query["to"], query["pending"] == "1")))
+                "POST /notes/record" -> reply(socket, audio.notes.startRecording(body.optString("to"), body.optString("from").ifEmpty { null },
+                    if (body.has("maxSeconds")) body.optInt("maxSeconds") else null))
+                "POST /notes/record/stop" -> json(socket, 200, JSONObject().put("ok", audio.notes.stopRecording()))
+                "POST /notes/play" -> reply(socket, audio.notes.play(body.optString("id").ifEmpty { null }, body.optString("to").ifEmpty { null }, body.optBoolean("announce", true)))
+                "POST /notes/play/stop" -> { audio.notes.stopPlaying(); json(socket, 200, JSONObject().put("ok", true)) }
+                "POST /notes/delete" -> json(socket, 200, JSONObject().put("ok", audio.notes.delete(body.optString("id"))))
                 "POST /mcp" -> {
                     // Browsers always send Origin; MCP clients do not. Refusing it blocks DNS-rebinding and cross-site calls.
                     if ("origin" in headers) { json(socket, 403, JSONObject().put("error", "origin_not_allowed")); return }

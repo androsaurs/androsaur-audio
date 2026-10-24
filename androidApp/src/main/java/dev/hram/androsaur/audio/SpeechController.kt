@@ -106,6 +106,20 @@ class SpeechController(
 
     fun stop() { synchronized(lock) { speaker }?.stop() }
 
+    /** Says the text and returns when it has been said (or failed); for callers that go on to other sound. Error code or null. */
+    fun speakAndWait(text: String, requestedSpeed: Float? = null): String? {
+        val clean = text.trim()
+        if (clean.isEmpty()) return "empty_text"
+        val current = synchronized(lock) { if (state != "ready") return "speaker_not_ready"; speaker }
+        current?.stop()
+        val usedSpeed = requestedSpeed ?: speed
+        val done = exec.submit<Boolean> {
+            val sp = synchronized(lock) { if (state == "ready") speaker else null }
+            sp != null && say(sp, clean, usedSpeed) != null
+        }
+        return try { if (done.get()) null else "speech_failed" } catch (e: Exception) { "speech_failed" }
+    }
+
     /** Speaks with a given engine and keeps the microphone deaf meanwhile. */
     private fun say(sp: Speaker, text: String, usedSpeed: Float): SpeechTiming? {
         micMutedUntil = Long.MAX_VALUE

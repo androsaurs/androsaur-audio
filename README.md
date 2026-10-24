@@ -28,6 +28,18 @@ sherpa-onnx, на телефоне) и `system` / `system:<пакет>` (сис�
 рот только пульсирует (`approximate`). Библиотеку и голоса скачивает `./scripts/fetch-tts.sh` (в git их нет); лицензии — в
 `androidApp/src/main/assets/tts/NOTICE.md`. Нужна именно sherpa-onnx 1.13.x: в 2.0.0 убран встроенный фонемизатор espeak.
 
+## Записки
+
+Голосовые записки для человека: сигнал, затем запись до паузы (около 1,5 с) или лимита (по умолчанию 60 с, до 120). Звук хранится
+WAV-файлом в `filesDir/notes` (на телефоне, не текстом) с индексом, поэтому очередь переживает перезапуск службы. Запись подтягивается
+по громкости (микрофон телефона тихий, речь около −50 дБ; усиление не больше 64 раз) и обрезается по краям. Не прослушанная записка живёт
+14 дней, прослушанная сутки, всего не больше 50. Пока идёт запись или звук, wake-word глух. Получатель сравнивается без учёта регистра.
+Экран «Записки: оставить и проиграть»; API: `POST /notes/record {"to","from","maxSeconds"}`, `/notes/record/stop`, `GET /notes[?to=&pending=1]`
+(кириллицу в строке запроса кодировать), `POST /notes/play {"id"|"to","announce"}`, `/notes/play/stop`, `/notes/delete {"id"}`;
+MCP: `record_note`, `stop_recording`, `list_notes`, `play_note`, `stop_note`, `delete_note`. События: `note_recording_started`,
+`note_recorded`, `note_record_failed` (`no_speech`, `too_short`, с `peakDbfs` и `thresholdDbfs`), `note_playing`, `note_played`,
+`note_play_failed`, `note_deleted`. Доставка по лицу и голосовой ввод получателя («передай жене…») делаются в главном приложении и позже.
+
 ## Запуск
 
 Модель Vosk (46 МБ) в git не лежит: `./scripts/fetch-vosk-model.sh` кладёт её в assets с
@@ -46,7 +58,7 @@ curl -H "Authorization: Bearer <код>" "http://<адрес>:8089/events?after=
 claude mcp add --transport http androsaur-audio http://<адрес>:8089/mcp --header "Authorization: Bearer <код>"
 ```
 
-MCP-инструменты: `status`, `recent_events`, `set_engine`, `simulate_wake`, `speak`, `stop_speaking`, `speech_status`, `set_speaker`, `speech_bench`. Сервис объявляется в сети
+MCP-инструменты: `status`, `recent_events`, `set_engine`, `simulate_wake`, `speak`, `stop_speaking`, `speech_status`, `set_speaker`, `speech_bench`, `record_note`, `stop_recording`, `list_notes`, `play_note`, `stop_note`, `delete_note`. Сервис объявляется в сети
 как `_androsaur-audio._tcp`.
 
 Устройство и открытые вопросы — [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
