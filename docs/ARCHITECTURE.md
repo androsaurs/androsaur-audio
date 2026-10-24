@@ -40,7 +40,9 @@
 - Микрофон монопольный, читает только этот модуль, остальным отдаёт события.
 - Пакет `dev.hram.androsaur.audio`, название «Androsaur Звук», mDNS `_androsaur-audio._tcp`.
 - Доверие: подпись одним ключом и разрешение `dev.hram.androsaur.audio.permission.CONTROL`
-  (`signature`); сервис для этого объявлен `exported`. Работа с чужим приложением не проверялась.
+  (`signature`); сервис для этого объявлен `exported`. Проверено 2026-10-24 на Redmi 12 (Android 15): главное приложение
+  `androsaur` запускает сервис из переднего плана и получает порт и токен через `LinkProvider`
+  (`content://dev.hram.androsaur.audio.link`, вызов `link`, под тем же разрешением); дальше обычный HTTP на localhost.
 
 ## Что в каркасе выбрано без решения владельца (можно менять)
 

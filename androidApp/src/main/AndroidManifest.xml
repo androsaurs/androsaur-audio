@@ -13,6 +13,9 @@
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
         </activity>
+        <!-- Hands the local server's access code to apps signed with the same key (see LinkProvider). -->
+        <provider android:name=".LinkProvider" android:authorities="dev.hram.androsaur.audio.link" android:exported="true"
+            android:permission="dev.hram.androsaur.audio.permission.CONTROL" />
         <service android:name=".AudioService" android:exported="true"
             android:permission="dev.hram.androsaur.audio.permission.CONTROL" android:foregroundServiceType="microphone" />
     </application>
