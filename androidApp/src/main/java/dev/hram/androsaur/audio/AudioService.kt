@@ -15,8 +15,10 @@ import android.os.SystemClock
 import android.util.Log
 import dev.hram.androsaur.audio.events.AudioEvent
 import dev.hram.androsaur.audio.events.EventLog
+import dev.hram.androsaur.audio.wake.EngineSpec
 import dev.hram.androsaur.audio.wake.NoWakeWordEngine
 import dev.hram.androsaur.audio.wake.WakeWordEngine
+import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
@@ -26,12 +28,23 @@ class AudioService : Service() {
     private val binder = LocalBinder()
     private val log = EventLog()
     private val bootId = UUID.randomUUID().toString()
-    private val engine: WakeWordEngine = NoWakeWordEngine()
-    private var microphone: MicrophoneListener? = null
+    private val prefs by lazy { getSharedPreferences("audio", MODE_PRIVATE) }
+    private val factory by lazy { EngineFactory(this) }
     private var server: PhoneServer? = null
     private val nsd by lazy { NsdAdvertiser(this) }
     @Volatile private var lastWakeAt = 0L
     @Volatile var error: String? = null; private set
+
+    /** Guards the engine fields below; engine loading runs outside it. */
+    private val engineLock = Any()
+    private var generation = 0
+    private var engine: WakeWordEngine = NoWakeWordEngine()
+    private var microphone: MicrophoneListener? = null
+    private var spec: EngineSpec = EngineSpec.None
+    private var engineState = "loading"
+    private var engineError: String? = null
+    private var engineLoadMs = 0L
+    private var destroyed = false
 
     override fun onCreate() {
         super.onCreate()
@@ -56,12 +69,9 @@ class AudioService : Service() {
             stopSelf()
             return
         }
-        record("service_started", "engine" to engine.name)
-        microphone = MicrophoneListener(engine,
-            onWake = { record("wake_word", "engine" to engine.name); lastWakeAt = SystemClock.elapsedRealtime() },
-            onSilence = { silent -> record(if (silent) "microphone_silent" else "microphone_recovered") },
-            onError = { code -> error = code; record("error", "code" to code) },
-        ).also { it.start() }
+        val saved = EngineSpec.parse(prefs.getString(KEY_ENGINE, null) ?: "") ?: EngineSpec.None
+        record("service_started", "engine" to saved.id)
+        activate(saved)
         server = PhoneServer(this, AccessToken.get(this)).also {
             try { it.start(); nsd.start(PhoneServer.PORT) }
             catch (e: java.io.IOException) { error = "http_port_busy"; Log.w(TAG, "cannot bind ${PhoneServer.PORT}", e) }
@@ -74,9 +84,67 @@ class AudioService : Service() {
     override fun onDestroy() {
         nsd.stop()
         server?.close()
-        microphone?.stop()
-        engine.close()
+        synchronized(engineLock) {
+            destroyed = true
+            generation++
+            microphone?.stop(); microphone = null
+            engine.close()
+        }
+        factory.close()
         super.onDestroy()
+    }
+
+    /** Engines the user can choose, as setting strings. */
+    fun availableEngines(): List<String> = factory.available()
+
+    /** Switches the wake-word engine and remembers the choice. Returns an error code, or null when loading has started. */
+    fun setEngine(id: String): String? {
+        val wanted = EngineSpec.parse(id) ?: return "unknown_engine"
+        if (id !in availableEngines()) return "engine_not_available"
+        prefs.edit().putString(KEY_ENGINE, wanted.id).apply()
+        activate(wanted)
+        return null
+    }
+
+    private fun activate(wanted: EngineSpec) {
+        val mine = synchronized(engineLock) {
+            if (destroyed) return
+            microphone?.stop(); microphone = null
+            engine.close(); engine = NoWakeWordEngine()
+            spec = wanted; engineState = "loading"; engineError = null; error = null
+            ++generation
+        }
+        Thread({
+            val began = SystemClock.elapsedRealtime()
+            val built = runCatching { factory.create(wanted) }
+            val tookMs = SystemClock.elapsedRealtime() - began
+            synchronized(engineLock) {
+                if (mine != generation) { built.getOrNull()?.close(); return@synchronized }
+                val ready = built.getOrElse { e ->
+                    Log.w(TAG, "engine ${wanted.id} failed", e)
+                    engineError = "${e.javaClass.simpleName}: ${e.message}".take(200)
+                    record("engine_failed", "engine" to wanted.id, "reason" to (engineError ?: ""))
+                    null
+                }
+                engine = ready ?: NoWakeWordEngine()
+                engineState = if (ready != null) "ready" else "failed"
+                engineLoadMs = tookMs
+                microphone = MicrophoneListener(engine,
+                    onWake = { heard, level -> onWake(wanted.id, heard, level) },
+                    onSilence = { silent -> record(if (silent) "microphone_silent" else "microphone_recovered") },
+                    onError = { code -> error = code; record("error", "code" to code) },
+                ).also { it.start() }
+                if (ready != null) record("engine_ready", "engine" to wanted.id, "loadMs" to tookMs.toString())
+            }
+        }, "engine-load").start()
+    }
+
+    private fun onWake(engineId: String, heard: String? = null, levelDbfs: Double? = null) {
+        val data = mutableListOf("engine" to engineId)
+        heard?.let { data += "heard" to it }
+        levelDbfs?.let { data += "levelDbfs" to (Math.round(it * 10) / 10.0).toString() }
+        record("wake_word", *data.toTypedArray())
+        lastWakeAt = SystemClock.elapsedRealtime()
     }
 
     fun record(type: String, vararg data: Pair<String, String>) {
@@ -85,20 +153,26 @@ class AudioService : Service() {
 
     fun eventsSince(afterId: Long): List<AudioEvent> = synchronized(log) { log.since(afterId) }
 
-    /** Raises the same event as a real detection, so listeners can be tested before an engine exists. */
-    fun simulateWake() {
-        record("wake_word", "engine" to "simulated")
-        lastWakeAt = SystemClock.elapsedRealtime()
-    }
+    /** Raises the same event as a real detection, so listeners can be tested without saying the phrase. */
+    fun simulateWake() = onWake("simulated")
 
     fun status(): JSONObject {
-        val mic = microphone
         val json = JSONObject().put("bootId", bootId).put("version", BuildConfig.VERSION_NAME)
-            .put("listening", mic != null && error == null)
-            .put("engine", JSONObject().put("name", engine.name).put("sampleRate", engine.sampleRate).put("frameLength", engine.frameLength))
             .put("latestEventId", synchronized(log) { log.latestId })
-        if (mic != null) json.put("microphone", JSONObject().put("levelDbfs", Math.round(mic.levelDbfs * 10) / 10.0)
-            .put("frames", mic.frames).put("silent", mic.silent))
+        synchronized(engineLock) {
+            val mic = microphone
+            json.put("listening", mic != null && error == null)
+            val engineJson = JSONObject().put("id", spec.id).put("name", engine.name).put("state", engineState)
+                .put("sampleRate", engine.sampleRate).put("frameLength", engine.frameLength).put("loadMs", engineLoadMs)
+                .put("available", JSONArray(availableEngines()))
+            engineError?.let { engineJson.put("error", it) }
+            if (mic != null) {
+                engineJson.put("msPerFrame", Math.round(mic.engineMsPerFrame * 100) / 100.0).put("frameMs", Math.round(mic.frameMs * 10) / 10.0)
+                json.put("microphone", JSONObject().put("levelDbfs", Math.round(mic.levelDbfs * 10) / 10.0)
+                    .put("frames", mic.frames).put("silent", mic.silent))
+            }
+            json.put("engine", engineJson)
+        }
         if (lastWakeAt != 0L) json.put("sinceLastWakeMs", SystemClock.elapsedRealtime() - lastWakeAt)
         error?.let { json.put("error", it) }
         return json
@@ -106,6 +180,7 @@ class AudioService : Service() {
 
     companion object {
         private const val CHANNEL = "audio"
+        private const val KEY_ENGINE = "engine"
         private const val TAG = "AndrosaurAudio"
     }
 }

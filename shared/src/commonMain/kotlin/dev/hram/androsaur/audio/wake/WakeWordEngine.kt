@@ -11,6 +11,8 @@ interface WakeWordEngine {
     val frameLength: Int
     /** True when the wake phrase ended inside this frame. */
     fun process(frame: ShortArray): Boolean
+    /** What the engine heard at the last detection, when it can tell (speech recognizers can, classifiers cannot). */
+    val lastHeard: String? get() = null
     fun close()
 }
 

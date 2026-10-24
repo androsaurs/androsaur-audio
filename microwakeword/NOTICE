@@ -1,0 +1,8 @@
+This module is derived from the `microwakeword` module of Home Assistant Android
+(https://github.com/home-assistant/android, commit c0457ffd2353bff63eceafd2a82ca0f505a70e10),
+licensed under the Apache License 2.0 (see LICENSE).
+
+Changes: Kotlin package renamed to dev.hram.androsaur.audio.microwakeword (and the matching JNI
+class path); Timber logging replaced by android.util.Log; the debug-only HWAddressSanitizer
+block removed from CMakeLists.txt. The native engine is otherwise unchanged. The feature
+extraction settings follow ESPHome's micro_wake_word component.

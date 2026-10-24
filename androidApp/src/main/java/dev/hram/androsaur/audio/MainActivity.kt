@@ -29,12 +29,14 @@ class MainActivity : ComponentActivity() {
     private var permissionRequested = false
     private var manuallyStopped = false
     private var bound = false
+    private var service by mutableStateOf<AudioService?>(null)
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
-            val service = (binder as AudioService.LocalBinder).service
-            status = service.error?.let { "Ошибка: $it" } ?: "Слушаю"
+            val bound = (binder as AudioService.LocalBinder).service
+            service = bound
+            status = bound.error?.let { "Ошибка: $it" } ?: "Слушаю"
         }
-        override fun onServiceDisconnected(name: ComponentName?) { status = "Слушание остановлено" }
+        override fun onServiceDisconnected(name: ComponentName?) { service = null; status = "Слушание остановлено" }
     }
     private val permissions = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) startListening()
@@ -51,6 +53,7 @@ class MainActivity : ComponentActivity() {
                         Text("Звук", style = MaterialTheme.typography.headlineLarge)
                         Text("Каркас · wake-word «Привет, Петя» пока не подключён")
                         Text(status, style = MaterialTheme.typography.titleMedium)
+                        EnginePicker(service)
                         Button(onClick = { requestStart() }, modifier = Modifier.fillMaxWidth()) { Text("Начать слушать") }
                         OutlinedButton(onClick = {
                             manuallyStopped = true
@@ -94,6 +97,7 @@ class MainActivity : ComponentActivity() {
     private fun disconnect() {
         if (bound) unbindService(connection)
         bound = false
+        service = null
     }
 
     override fun onStop() { disconnect(); super.onStop() }
@@ -102,5 +106,28 @@ class MainActivity : ComponentActivity() {
         val ip = NetworkInterface.getNetworkInterfaces().toList().flatMap { it.inetAddresses.toList() }
             .firstOrNull { !it.isLoopbackAddress && it.hostAddress?.contains(':') == false }?.hostAddress ?: "IP-телефона"
         return "http://$ip:${PhoneServer.PORT}\nКод доступа (Bearer): ${AccessToken.get(this)}"
+    }
+}
+
+@Composable
+private fun EnginePicker(service: AudioService?) {
+    if (service == null) return
+    var summary by remember { mutableStateOf("") }
+    var current by remember { mutableStateOf("") }
+    LaunchedEffect(service) {
+        while (true) {
+            val engine = service.status().optJSONObject("engine")
+            current = engine?.optString("id") ?: ""
+            summary = engine?.let {
+                "${it.optString("id")} · ${it.optString("state")} · ${it.optDouble("msPerFrame", 0.0)} мс на кадр ${it.optDouble("frameMs", 0.0)} мс"
+            } ?: ""
+            kotlinx.coroutines.delay(1000)
+        }
+    }
+    Text("Движок wake-word", style = MaterialTheme.typography.titleMedium)
+    Text(summary)
+    service.availableEngines().forEach { id ->
+        if (id == current) Button(onClick = {}, modifier = Modifier.fillMaxWidth()) { Text(id) }
+        else OutlinedButton(onClick = { Thread { service.setEngine(id) }.start() }, modifier = Modifier.fillMaxWidth()) { Text(id) }
     }
 }

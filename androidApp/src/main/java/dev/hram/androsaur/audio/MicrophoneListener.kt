@@ -13,13 +13,17 @@ import dev.hram.androsaur.audio.wake.WakeWordEngine
 /** The only reader of the microphone in the Androsaur system; everything else receives events from it. */
 class MicrophoneListener(
     private val engine: WakeWordEngine,
-    private val onWake: () -> Unit,
+    private val onWake: (heard: String?, levelDbfs: Double) -> Unit,
     private val onSilence: (silent: Boolean) -> Unit,
     private val onError: (code: String) -> Unit,
 ) {
     @Volatile var levelDbfs = AudioLevel.FLOOR_DBFS; private set
     @Volatile var frames = 0L; private set
     @Volatile var silent = false; private set
+    /** Moving average of the time the engine spends on one frame, in milliseconds. */
+    @Volatile var engineMsPerFrame = 0.0; private set
+    /** Frame duration, for comparing engine cost against real time. */
+    val frameMs: Double get() = engine.frameLength * 1000.0 / engine.sampleRate
     @Volatile private var stopped = false
     private var thread: Thread? = null
 
@@ -53,7 +57,10 @@ class MicrophoneListener(
                 val wasSilent = detector.silent
                 detector.onFrame(AudioLevel.isDigitalSilence(frame))
                 if (detector.silent != wasSilent) { silent = detector.silent; onSilence(silent) }
-                if (engine.process(frame) && gate.accept(SystemClock.elapsedRealtime())) onWake()
+                val began = System.nanoTime()
+                val detected = engine.process(frame)
+                engineMsPerFrame += ((System.nanoTime() - began) / 1e6 - engineMsPerFrame) * 0.05
+                if (detected && gate.accept(SystemClock.elapsedRealtime())) onWake(engine.lastHeard, levelDbfs)
             }
         } catch (e: IllegalStateException) {
             onError("microphone_stopped:${e.javaClass.simpleName}")

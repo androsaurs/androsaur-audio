@@ -1,6 +1,7 @@
 .gradle/
 .kotlin/
 **/build/
+.cxx/
 local.properties
 artifacts/
 
@@ -19,3 +20,7 @@ artifacts/
 .idea/
 *.iml
 .DS_Store
+
+# Vosk model (fetched by scripts/fetch-vosk-model.sh)
+androidApp/src/main/assets/vosk-model-*.zip
+androidApp/src/main/assets/*.part

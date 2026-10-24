@@ -8,13 +8,25 @@
 | Слой | Где | Что делает |
 | --- | --- | --- |
 | Логика без Android | `shared` (KMP) | `WakeWordEngine` и `WakeGate` (контракт движка, защита от повторов), `AudioLevel` и `SilenceDetector` (уровень, признак «микрофон занят другим»), `EventLog` (журнал событий) |
-| Захват | `MicrophoneListener` | один поток читает `AudioRecord` (16 кГц, моно), считает уровень, кормит движок |
+| Захват | `MicrophoneListener` | один поток читает `AudioRecord` (16 кГц, моно), считает уровень и время работы движка на кадр, кормит движок |
+| Движки | `EngineFactory`, `VoskEngine`, `MicroWakeWordEngine`, модуль `microwakeword` | сменные реализации `WakeWordEngine`; один движок за раз, загрузка в фоне (`engine.state`: loading/ready/failed) |
 | Сервис | `AudioService` | foreground-сервис типа `microphone`, владеет захватом, журналом, сервером, mDNS |
 | Транспорт | `PhoneServer`, `McpEndpoint`, `NsdAdvertiser` | HTTP (`/status`, `/events`, `/mcp`) на порту 8089, MCP, анонс `_androsaur-audio._tcp` |
 | Экран | `MainActivity` | разрешения, старт и остановка, адрес и код доступа |
 
-События: `service_started`, `wake_word`, `microphone_silent`, `microphone_recovered`, `error`.
+События: `service_started`, `engine_ready`, `engine_failed`, `wake_word`, `microphone_silent`, `microphone_recovered`, `error`.
 Клиент читает их по `after=<последний id>`; поток (SSE/WebSocket) добавится вместе с протоколом.
+
+## Движки wake-word
+
+Идентификаторы: `none`, `vosk`, `mww:<модель>`. Выбор хранится в настройках приложения.
+- **vosk:** малая русская модель (`vosk-model-small-ru-0.22`, 46 МБ, распаковывается в `filesDir`
+  при первом запуске), распознаватель ограничен грамматикой `["привет петя", "[unk]"]`;
+  срабатывание — когда текст содержит фразу целыми словами (`PhraseMatcher`).
+- **mww:** потоковая TFLite-модель microWakeWord. Нативный модуль скопирован из Home Assistant
+  Android (признаки звука как в ESPHome + TFLite Micro). Модели лежат в `assets/wakeword/`
+  (`<имя>.tflite` + `<имя>.json`), новая модель = два файла. Пока только английские тестовые.
+- Чтобы сравнивать, в `/status` есть `engine.msPerFrame` против `engine.frameMs`.
 
 ## Решено (из brief)
 

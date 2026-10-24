@@ -96,6 +96,10 @@ class PhoneServer(private val audio: AudioService, private val token: String) {
                         JSONObject().put("id", it.id).put("atMs", it.atMs).put("type", it.type).put("data", JSONObject(it.data))
                     })))
                 }
+                "POST /engine" -> {
+                    val problem = audio.setEngine(body.optString("engine"))
+                    json(socket, if (problem == null) 200 else 400, if (problem == null) JSONObject().put("ok", true) else JSONObject().put("error", problem))
+                }
                 "POST /mcp" -> {
                     // Browsers always send Origin; MCP clients do not. Refusing it blocks DNS-rebinding and cross-site calls.
                     if ("origin" in headers) { json(socket, 403, JSONObject().put("error", "origin_not_allowed")); return }

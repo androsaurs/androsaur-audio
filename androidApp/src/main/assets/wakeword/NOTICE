@@ -1,0 +1,4 @@
+Pre-trained microWakeWord models (okay_nabu, hey_jarvis, hey_mycroft), copied from the Home Assistant
+Android app (Apache License 2.0), which takes them from
+https://github.com/esphome/micro-wake-word-models (Apache License 2.0, covering the model weights).
+They are English test models; the product wake phrase "Привет, Петя" needs its own model.
