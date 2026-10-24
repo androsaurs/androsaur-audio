@@ -12,13 +12,23 @@ import android.os.IBinder
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.lerp
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -53,6 +63,7 @@ class MainActivity : ComponentActivity() {
                         Text("Звук", style = MaterialTheme.typography.headlineLarge)
                         Text("Каркас · wake-word «Привет, Петя» пока не подключён")
                         Text(status, style = MaterialTheme.typography.titleMedium)
+                        WakeIndicator(service)
                         EnginePicker(service)
                         Button(onClick = { requestStart() }, modifier = Modifier.fillMaxWidth()) { Text("Начать слушать") }
                         OutlinedButton(onClick = {
@@ -110,6 +121,46 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
+private fun WakeIndicator(service: AudioService?) {
+    if (service == null) return
+    val pulse = remember { Animatable(0f) }
+    var count by remember { mutableLongStateOf(service.wakeCount) }
+    var lastText by remember { mutableStateOf("") }
+    var level by remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(service) {
+        var seen = service.wakeCount
+        while (true) {
+            level = ((service.micLevelDbfs() + 80) / 60).coerceIn(0.0, 1.0).toFloat()
+            if (service.wakeCount != seen) {
+                seen = service.wakeCount
+                count = seen
+                lastText = service.lastWakeText
+                launch { pulse.snapTo(1f); pulse.animateTo(0f, tween(1800)) }
+            }
+            delay(80)
+        }
+    }
+    val idle = Color(0xffe6e2d6)
+    val hit = Color(0xff6fdba3)
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Box(
+            Modifier.fillMaxWidth().height(96.dp).scale(1f + 0.06f * pulse.value)
+                .clip(RoundedCornerShape(20.dp)).background(lerp(idle, hit, pulse.value)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(if (pulse.value > 0.02f) "Фраза услышана" else "Жду фразу", style = MaterialTheme.typography.titleLarge,
+                    color = lerp(Color(0xff555146), Color(0xff10281c), pulse.value))
+                Text(if (count == 0L) "Срабатываний пока нет" else "№$count · $lastText", fontSize = 14.sp,
+                    color = lerp(Color(0xff777366), Color(0xff23402f), pulse.value))
+            }
+        }
+        LinearProgressIndicator(progress = { level }, modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
+            gapSize = 0.dp, drawStopIndicator = {})
+    }
+}
+
+@Composable
 private fun EnginePicker(service: AudioService?) {
     if (service == null) return
     var summary by remember { mutableStateOf("") }
@@ -121,13 +172,15 @@ private fun EnginePicker(service: AudioService?) {
             summary = engine?.let {
                 "${it.optString("id")} · ${it.optString("state")} · ${it.optDouble("msPerFrame", 0.0)} мс на кадр ${it.optDouble("frameMs", 0.0)} мс"
             } ?: ""
-            kotlinx.coroutines.delay(1000)
+            delay(1000)
         }
     }
-    Text("Движок wake-word", style = MaterialTheme.typography.titleMedium)
-    Text(summary)
-    service.availableEngines().forEach { id ->
-        if (id == current) Button(onClick = {}, modifier = Modifier.fillMaxWidth()) { Text(id) }
-        else OutlinedButton(onClick = { Thread { service.setEngine(id) }.start() }, modifier = Modifier.fillMaxWidth()) { Text(id) }
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text("Движок wake-word", style = MaterialTheme.typography.titleMedium)
+        Text(summary, fontSize = 14.sp)
+        service.availableEngines().forEach { id ->
+            if (id == current) Button(onClick = {}, modifier = Modifier.fillMaxWidth()) { Text(id) }
+            else OutlinedButton(onClick = { Thread { service.setEngine(id) }.start() }, modifier = Modifier.fillMaxWidth()) { Text(id) }
+        }
     }
 }

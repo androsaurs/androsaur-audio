@@ -33,13 +33,17 @@ class AudioService : Service() {
     private var server: PhoneServer? = null
     private val nsd by lazy { NsdAdvertiser(this) }
     @Volatile private var lastWakeAt = 0L
+    private val wakes = java.util.concurrent.atomic.AtomicLong()
+    /** Number of detections since the service started (simulated ones included); the screen watches it to flash. */
+    val wakeCount: Long get() = wakes.get()
+    @Volatile var lastWakeText: String = ""; private set
     @Volatile var error: String? = null; private set
 
     /** Guards the engine fields below; engine loading runs outside it. */
     private val engineLock = Any()
     private var generation = 0
     private var engine: WakeWordEngine = NoWakeWordEngine()
-    private var microphone: MicrophoneListener? = null
+    @Volatile private var microphone: MicrophoneListener? = null
     private var spec: EngineSpec = EngineSpec.None
     private var engineState = "loading"
     private var engineError: String? = null
@@ -144,8 +148,13 @@ class AudioService : Service() {
         heard?.let { data += "heard" to it }
         levelDbfs?.let { data += "levelDbfs" to (Math.round(it * 10) / 10.0).toString() }
         record("wake_word", *data.toTypedArray())
+        lastWakeText = listOfNotNull(engineId, heard).joinToString(" · ")
+        wakes.incrementAndGet()
         lastWakeAt = SystemClock.elapsedRealtime()
     }
+
+    /** Input level for the on-screen meter; cheap and lock-free. */
+    fun micLevelDbfs(): Double = microphone?.levelDbfs ?: dev.hram.androsaur.audio.level.AudioLevel.FLOOR_DBFS
 
     fun record(type: String, vararg data: Pair<String, String>) {
         synchronized(log) { log.append(type, System.currentTimeMillis(), data.toMap()) }
