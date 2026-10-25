@@ -64,6 +64,20 @@ MCP: `record_note`, `stop_recording`, `list_notes`, `play_note`, `stop_note`, `d
 `command_listening`, `command_heard` (понятый текст), `command_note`, `command_timeout` (с `peakDbfs`, `utterances`, `lastPartial`),
 `command_failed`. `GET /speech` отдаёт `mode` (`command`, `recording`, `note` или пусто) для подписи на лице.
 
+### Короткие команды
+
+В том же окне после wake-word понимаются короткие команды без LLM (`shared/.../command/QuickCommands.kt`, с тестами): «который час»,
+«какая погода», «какая погода завтра», «таймер на десять минут» (числа словами, «полчаса», «полторы минуты», «час», до трёх часов),
+«сколько осталось», «стоп» (и «останови / отключи / сбрось / отмени таймер»), «есть мне записки?». Свои дела модуль делает сам: «стоп» останавливает звонок, речь и записку;
+«есть мне записки?» перечисляет непрослушанные записки того, кто в кадре (по ID из `/context`), и спрашивает «Проиграть?», ждёт
+«да» или «нет». Остальное (время, погода, таймер) — дело главного приложения: модуль пишет событие `command` с `intent`
+(`time`, `weather`, `weather_tomorrow`, `timer` и `seconds`, `timer_left`, `stop` и `wasRinging`), а отвечает голосом `androsaur`.
+Текстом без голоса: `POST /command {"text":"который час"}`.
+
+**Звонок таймера:** `POST /ring {"seconds"}` (1–600, по умолчанию 60), `POST /ring/stop`; «динь-дон» с паузами, в паузах
+микрофон открыт, и wake-word звонок останавливает. События `ring_started`, `ring_stopped` (`stop`, `wake_word`, `timeout`);
+`ringing` в `/status`.
+
 ## Запуск
 
 Модель Vosk (46 МБ) в git не лежит: `./scripts/fetch-vosk-model.sh` кладёт её в assets с

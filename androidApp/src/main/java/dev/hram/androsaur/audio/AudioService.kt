@@ -49,7 +49,8 @@ class AudioService : Service() {
     fun setPerson(name: String?, id: String? = null) { personName = name?.trim()?.ifEmpty { null }; personId = id?.trim()?.ifEmpty { null }; personAt = SystemClock.elapsedRealtime() }
     private fun person(): String? = personName?.takeIf { SystemClock.elapsedRealtime() - personAt < PERSON_FRESH_MS }
     private fun currentPersonId(): String? = personId?.takeIf { SystemClock.elapsedRealtime() - personAt < PERSON_FRESH_MS }
-    val commands by lazy { CommandListener({ words -> factory.commandRecognizer(words) }, { microphone }, recipients, speech, notes, ::person, ::currentPersonId) { type, data -> record(type, *data) } }
+    val ringer by lazy { Ringer { type, data -> record(type, *data) } }
+    val commands by lazy { CommandListener({ words -> factory.commandRecognizer(words) }, { microphone }, recipients, speech, notes, ringer, ::person, ::currentPersonId) { type, data -> record(type, *data) } }
     private val nsd by lazy { NsdAdvertiser(this) }
     @Volatile private var lastWakeAt = 0L
     private val wakes = java.util.concurrent.atomic.AtomicLong()
@@ -181,7 +182,7 @@ class AudioService : Service() {
                     onWake = { heard, level -> onWake(wanted.id, heard, level) },
                     onSilence = { silent -> record(if (silent) "microphone_silent" else "microphone_recovered") },
                     onError = { code -> error = code; record("error", "code" to code) },
-                    mutedUntil = { maxOf(speech.micMutedUntil, notes.micMutedUntil) },
+                    mutedUntil = { maxOf(speech.micMutedUntil, notes.micMutedUntil, ringer.micMutedUntil) },
                 ).also { it.start() }
                 if (ready != null) record("engine_ready", "engine" to wanted.id, "loadMs" to tookMs.toString())
             }
@@ -193,6 +194,8 @@ class AudioService : Service() {
         heard?.let { data += "heard" to it }
         levelDbfs?.let { data += "levelDbfs" to (Math.round(it * 10) / 10.0).toString() }
         record("wake_word", *data.toTypedArray())
+        // «Петя!» while the timer rings is the natural way to silence it.
+        ringer.stop("wake_word")
         lastWakeText = listOfNotNull(engineId, heard).joinToString(" · ")
         wakes.incrementAndGet()
         commands.open()
@@ -231,6 +234,7 @@ class AudioService : Service() {
         json.put("speech", JSONObject().put("speaker", speech.status().optString("speaker")).put("state", speech.status().optString("state")).put("speaking", speech.mouth.speaking))
         json.put("notes", notes.status())
         json.put("commands", JSONObject().put("listening", commands.listening).put("recipients", recipients.all().size))
+        json.put("ringing", ringer.ringing)
         if (lastWakeAt != 0L) json.put("sinceLastWakeMs", SystemClock.elapsedRealtime() - lastWakeAt)
         error?.let { json.put("error", it) }
         return json

@@ -220,6 +220,15 @@ class NoteController(
 
     fun readdress(from: String, into: String): Int = store.readdress(from, into)
 
+    /** The notes nobody has heard yet for the person with [personId] (or, for notes without an id, called [name]), oldest first. */
+    fun pendingFor(personId: String?, name: String?): List<Note> {
+        val me = name?.let { Recipient.normalize(it) }
+        return store.all().filter { n -> n.heardAtMs == null && (if (n.toId != null) n.toId == personId else me != null && n.to == me) }.sortedBy { it.createdAtMs }
+    }
+
+    /** The current name of who left [note]: by their id in the recipient book, else the name it was left with. */
+    fun fromName(note: Note): String = note.fromId?.let { id -> people().firstOrNull { it.personId == id }?.id } ?: note.from
+
     fun address(id: String, toId: String?, fromId: String?): Boolean = store.address(id, toId?.ifBlank { null }, fromId?.ifBlank { null })
 
     fun delete(id: String): Boolean = store.delete(id).also { if (it) record("note_deleted", arrayOf("id" to id)) }

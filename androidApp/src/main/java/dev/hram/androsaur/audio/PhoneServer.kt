@@ -102,6 +102,8 @@ class PhoneServer(private val audio: AudioService, private val token: String) {
                 }
                 "GET /speech" -> json(socket, 200, (if (query["full"] == "1") audio.speech.status() else audio.speech.live()).put("mode", audio.mode()))
                 "POST /speak" -> reply(socket, audio.speech.speak(body.optString("text"), if (body.has("speed")) body.optDouble("speed").toFloat() else null))
+                "POST /ring" -> reply(socket, audio.ringer.ring(body.optInt("seconds", 60)))
+                "POST /ring/stop" -> json(socket, 200, JSONObject().put("ok", true).put("wasRinging", audio.ringer.stop("stop")))
                 "POST /speak/stop" -> { audio.speech.stop(); json(socket, 200, JSONObject().put("ok", true)) }
                 "POST /speaker" -> reply(socket, audio.speech.configure(body.optString("engine").ifEmpty { null },
                     if (body.has("speed")) body.optDouble("speed").toFloat() else null, if (body.has("threads")) body.optInt("threads") else null))
