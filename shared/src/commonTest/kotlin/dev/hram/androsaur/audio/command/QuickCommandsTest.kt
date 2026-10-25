@@ -6,7 +6,7 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class QuickCommandsTest {
-    private fun p(text: String, answering: Boolean = false) = QuickCommands.parse(text, answering)
+    private fun p(text: String) = QuickCommands.parse(text)
 
     @Test fun theTime() {
         assertEquals(QuickCommand.Time, p("который час"))
@@ -48,20 +48,13 @@ class QuickCommandsTest {
         assertEquals(QuickCommand.Stop, p("хватит"))
     }
 
-    @Test fun myNotesButNotANoteForSomebody() {
-        assertEquals(QuickCommand.MyNotes, p("есть мне записки"))
-        assertEquals(QuickCommand.MyNotes, p("какие у меня сообщения"))
-        assertEquals(QuickCommand.MyNotes, p("для меня есть сообщения"))
+    @Test fun repeatTheNoteButNotANoteForSomebody() {
+        assertEquals(QuickCommand.RepeatNote, p("повтори записку"))
+        assertEquals(QuickCommand.RepeatNote, p("повтори последнее сообщение"))
+        assertEquals(QuickCommand.RepeatNote, p("проиграй еще раз записку"))
         assertNull(p("передай жене записку"))
         assertNull(p("запиши сообщение маше"))
-    }
-
-    @Test fun yesAndNoOnlyAfterAQuestion() {
-        assertEquals(QuickCommand.Yes, p("да", answering = true))
-        assertEquals(QuickCommand.Yes, p("давай проиграй", answering = true))
-        assertEquals(QuickCommand.No, p("нет", answering = true))
-        assertEquals(QuickCommand.No, p("не надо", answering = true))
-        assertNull(p("да"))
+        assertNull(p("повтори"), "repeat what — not a note")
     }
 
     @Test fun otherSpeechIsNoCommand() {
@@ -71,16 +64,7 @@ class QuickCommandsTest {
 
     @Test fun theRecognizerKnowsTheWords() {
         val words = QuickCommands.vocabulary
-        for (w in listOf("таймер", "который", "погода", "завтра", "стоп", "полчаса", "двадцать", "записки", "да", "нет")) assertTrue(w in words, w)
+        for (w in listOf("таймер", "который", "погода", "завтра", "стоп", "полчаса", "двадцать", "записку", "повтори")) assertTrue(w in words, w)
     }
 
-    @Test fun howManyNotes() {
-        assertEquals("одна записка", Phrases.notes(1))
-        assertEquals("две записки", Phrases.notes(2))
-        assertEquals("пять записок", Phrases.notes(5))
-        assertEquals("Записок нет.", Phrases.yourNotes(emptyList()))
-        assertEquals("Тебе одна записка: от Кати. Проиграть?", Phrases.yourNotes(listOf("Кати")))
-        assertEquals("Тебе три записки: от Кати и от Лёши. Проиграть?", Phrases.yourNotes(listOf("Кати", "Лёши", "Кати")))
-        assertEquals("Тебе две записки. Проиграть?", Phrases.yourNotes(listOf("", "")))
-    }
 }

@@ -2,8 +2,8 @@ package dev.hram.androsaur.audio.command
 
 /**
  * Short commands after the wake word that need no LLM and are answered by templates: the time, the weather (today or tomorrow), a
- * timer, how much is left on it, «стоп», «есть мне записки?» and the answers «да» / «нет» to a question. This is the layer of fast
- * things that stays when an LLM comes. Notes for somebody («передай жене…») are [CommandParser]'s and come after these.
+ * timer, how much is left on it, «стоп» / «останови таймер», «повтори записку». This is the layer of fast things that stays when an
+ * LLM comes. Notes for somebody («передай жене…») are [CommandParser]'s and come after these.
  */
 sealed interface QuickCommand {
     data object Time : QuickCommand
@@ -12,25 +12,17 @@ sealed interface QuickCommand {
     data class Timer(val seconds: Int) : QuickCommand
     data object TimerLeft : QuickCommand
     data object Stop : QuickCommand
-    data object MyNotes : QuickCommand
-    data object Yes : QuickCommand
-    data object No : QuickCommand
+    /** Play again the latest note for the person in front of the camera. */
+    data object RepeatNote : QuickCommand
 }
 
 object QuickCommands {
-    /**
-     * What the text asks, or null when it is none of these. [answering] — the assistant has just asked a yes/no question, so «да»,
-     * «давай», «нет» are understood too (otherwise they mean nothing).
-     */
-    fun parse(text: String, answering: Boolean = false): QuickCommand? {
+    /** What the text asks, or null when it is none of these. */
+    fun parse(text: String): QuickCommand? {
         val words = text.lowercase().replace('ё', 'е').split(Regex("[^а-яa-z0-9-]+")).filter { it.isNotEmpty() }
         if (words.isEmpty()) return null
         val has = { w: String -> w in words }
         val starts = { p: String -> words.any { it.startsWith(p) } }
-        if (answering) {
-            if (words.any { it in NO } || (has("не") && starts("надо"))) return QuickCommand.No
-            if (words.any { it in YES }) return QuickCommand.Yes
-        }
         if (words.any { it in STOP }) return QuickCommand.Stop
         if (starts("таймер")) {
             if (has("осталось") || has("сколько")) return QuickCommand.TimerLeft
@@ -39,10 +31,9 @@ object QuickCommands {
         if (has("осталось") && has("сколько")) return QuickCommand.TimerLeft
         if ((has("который") && starts("час")) || (has("сколько") && starts("врем")) || (has("какое") && has("время"))) return QuickCommand.Time
         if (starts("погод") || starts("прогноз")) return QuickCommand.Weather(tomorrow = has("завтра"))
-        // «Есть мне записки?», «Какие у меня сообщения?» — but not «передай … записку», which is a note for somebody.
-        if ((starts("запис") || starts("сообщен")) && words.none { it in NOTE_VERBS } && (has("есть") || has("какие") || has("мне") || has("меня"))) {
-            return QuickCommand.MyNotes
-        }
+        // «Повтори записку», «ещё раз сообщение» — but not «передай … записку», which is a note for somebody.
+        val again = starts("повтор") || (has("еще") && has("раз"))
+        if (again && (starts("запис") || starts("сообщен")) && words.none { it in NOTE_VERBS }) return QuickCommand.RepeatNote
         return null
     }
 
@@ -71,17 +62,16 @@ object QuickCommands {
 
     /** All the words these commands are made of, for a recognizer limited to a list of words. */
     val vocabulary: List<String> get() =
-        (STOP + YES + NO + NOTE_VERBS + NUMBERS.keys + listOf(
+        (STOP + NOTE_VERBS + NUMBERS.keys + listOf(
             "таймер", "таймера", "на", "поставь", "заведи", "засеки", "минут", "минуту", "минуты", "секунд", "секунду", "секунды",
             "час", "часа", "часов", "полчаса", "полминуты", "осталось", "сколько", "который", "времени", "время", "какое", "сейчас",
             "погода", "погоду", "погоды", "погодой", "прогноз", "какая", "завтра", "сегодня", "что", "с", "есть", "мне", "меня", "у",
-            "какие", "записки", "записок", "сообщения", "сообщений", "для", "не", "надо",
+            "повтори", "повтори-ка", "еще", "раз", "записку", "записка", "сообщение", "последнюю", "последнее", "проиграй",
+            "для", "не", "надо",
         )).distinct()
 
     private const val MAX_SECONDS = 3 * 3600
     private val STOP = setOf("стоп", "хватит", "отмена", "отмени", "замолчи", "тихо", "выключи", "останови", "остановить", "отключи", "сбрось")
-    private val YES = setOf("да", "давай", "проиграй", "включи", "ага", "конечно")
-    private val NO = setOf("нет", "не надо", "потом")
     private val NOTE_VERBS = setOf("передай", "передайте", "скажи", "скажите", "запиши", "запишите", "оставь", "оставьте", "отправь", "отправьте", "напиши", "напишите")
     private val NUMBERS: Map<String, Double> = mapOf(
         "один" to 1.0, "одна" to 1.0, "одну" to 1.0, "два" to 2.0, "две" to 2.0, "три" to 3.0, "четыре" to 4.0, "пять" to 5.0,
@@ -90,31 +80,4 @@ object QuickCommands {
         "восемнадцать" to 18.0, "девятнадцать" to 19.0, "двадцать" to 20.0, "тридцать" to 30.0, "сорок" to 40.0, "пятьдесят" to 50.0,
         "шестьдесят" to 60.0, "девяносто" to 90.0, "полтора" to 1.5, "полторы" to 1.5,
     )
-}
-
-/** Words for what the assistant says about notes: «одна записка», «две записки», «пять записок». */
-object Phrases {
-    private val feminine = listOf("ноль", "одна", "две", "три", "четыре", "пять", "шесть", "семь", "восемь", "девять", "десять")
-
-    fun notes(n: Int): String {
-        val word = when {
-            n % 100 in 11..14 -> "записок"
-            n % 10 == 1 -> "записка"
-            n % 10 in 2..4 -> "записки"
-            else -> "записок"
-        }
-        return "${feminine.getOrElse(n) { n.toString() }} $word"
-    }
-
-    /** «Тебе две записки: от Кати и от Лёши. Проиграть?» — [from] are the names of who left them (empty when unknown). */
-    fun yourNotes(from: List<String>): String {
-        if (from.isEmpty()) return "Записок нет."
-        val known = from.filter { it.isNotBlank() }.distinct()
-        val who = when (known.size) {
-            0 -> ""
-            1 -> ": от ${known[0]}"
-            else -> ": от " + known.dropLast(1).joinToString(", от ") + " и от " + known.last()
-        }
-        return "Тебе ${notes(from.size)}$who. Проиграть?"
-    }
 }

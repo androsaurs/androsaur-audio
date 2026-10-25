@@ -4,7 +4,6 @@ import android.os.SystemClock
 import dev.hram.androsaur.audio.command.Command
 import dev.hram.androsaur.audio.command.CommandParser
 import dev.hram.androsaur.audio.command.Declension
-import dev.hram.androsaur.audio.command.Phrases
 import dev.hram.androsaur.audio.command.QuickCommand
 import dev.hram.androsaur.audio.command.QuickCommands
 import org.json.JSONObject
@@ -62,8 +61,6 @@ class CommandListener(
         val rec = try { recognizer(words) } catch (e: Exception) { record("command_failed", arrayOf("reason" to "${e.javaClass.simpleName}: ${e.message}".take(120))); listening = false; return }
         val frames = LinkedBlockingQueue<ShortArray>(64)
         var verbSeen = false
-        /** The notes the assistant has just offered to play («Проиграть?»): the next «да» plays them. */
-        var offered: List<String>? = null
         val gain = dev.hram.androsaur.audio.notes.AutoGain()
         var peak = -120.0
         var finals = 0
@@ -81,26 +78,12 @@ class CommandListener(
                 finals++
                 val text = JSONObject(rec.result).optString("text")
                 if (text.isEmpty()) continue
-                val quick = if (verbSeen) null else QuickCommands.parse(text, answering = offered != null)
+                val quick = if (verbSeen) null else QuickCommands.parse(text)
                 if (quick != null) {
                     record("command_heard", arrayOf("text" to text.take(120), "understood" to name(quick)))
                     mic.commandTap = null
-                    when {
-                        offered != null && quick == QuickCommand.Yes -> { playAll(offered); return }
-                        offered != null && quick == QuickCommand.No -> { speech.speakAndWait("Хорошо."); return }
-                        quick == QuickCommand.MyNotes -> {
-                            val waiting = notes.pendingFor(personId(), person())
-                            if (personId() == null && person() == null) { speech.speakAndWait("Не вижу, кто спрашивает."); return }
-                            speech.speakAndWait(Phrases.yourNotes(waiting.map { notes.fromName(it) }))
-                            if (waiting.isEmpty()) return
-                            offered = waiting.map { it.id }
-                            frames.clear()
-                            mic.commandTap = { f -> frames.offer(f) }
-                            deadline = SystemClock.elapsedRealtime() + WINDOW_MS
-                            continue
-                        }
-                        else -> { quick(quick); return }
-                    }
+                    quick(quick)
+                    return
                 }
                 val command = CommandParser(recipients.all()).parse(text, verbSeen)
                 record("command_heard", arrayOf("text" to text.take(120), "understood" to (command?.recipient?.id ?: if (command != null) "no_recipient" else "none")))
@@ -139,26 +122,21 @@ class CommandListener(
                 speech.stop(); notes.stopPlaying()
                 record("command", arrayOf("intent" to "stop", "wasRinging" to rang.toString()))
             }
-            QuickCommand.MyNotes -> {
-                val waiting = notes.pendingFor(personId(), person())
-                speech.speakAndWait(Phrases.yourNotes(waiting.map { notes.fromName(it) }).removeSuffix(" Проиграть?"))
+            QuickCommand.RepeatNote -> {
+                val note = notes.latestFor(personId(), person())
+                when {
+                    personId() == null && person() == null -> speech.speakAndWait("Не вижу, кто спрашивает.")
+                    note == null -> speech.speakAndWait("Записок для тебя нет.")
+                    else -> {
+                        val problem = notes.play(note.id, null, true)
+                        record("command", arrayOf("intent" to "repeat_note", "note" to note.id) + (problem?.let { arrayOf("reason" to it) } ?: emptyArray()))
+                    }
+                }
             }
             QuickCommand.Time -> record("command", arrayOf("intent" to "time"))
             is QuickCommand.Weather -> record("command", arrayOf("intent" to if (command.tomorrow) "weather_tomorrow" else "weather"))
             is QuickCommand.Timer -> record("command", arrayOf("intent" to "timer", "seconds" to command.seconds.toString()))
             QuickCommand.TimerLeft -> record("command", arrayOf("intent" to "timer_left"))
-            QuickCommand.Yes, QuickCommand.No -> {}
-        }
-        listening = false
-    }
-
-    /** Plays the offered notes one after another, each with «Тебе сообщение от …»; each is marked heard when it played to the end. */
-    private fun playAll(ids: List<String>) {
-        for (id in ids) {
-            if (notes.play(id, null, true) != null) break
-            val until = SystemClock.elapsedRealtime() + 150_000
-            Thread.sleep(300)
-            while (notes.state != "idle" && SystemClock.elapsedRealtime() < until) Thread.sleep(200)
         }
         listening = false
     }
@@ -166,7 +144,7 @@ class CommandListener(
     private fun name(q: QuickCommand): String = when (q) {
         QuickCommand.Time -> "time"; is QuickCommand.Weather -> if (q.tomorrow) "weather_tomorrow" else "weather"
         is QuickCommand.Timer -> "timer"; QuickCommand.TimerLeft -> "timer_left"; QuickCommand.Stop -> "stop"
-        QuickCommand.MyNotes -> "my_notes"; QuickCommand.Yes -> "yes"; QuickCommand.No -> "no"
+        QuickCommand.RepeatNote -> "repeat_note"
     }
 
     /** Says whom the note is for and starts recording it. */
