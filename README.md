@@ -4,8 +4,8 @@
 сообщает остальным модулям, что прозвучало «Привет, Петя». Полезно и само по себе:
 любой клиент (ИИ-агент через MCP, другое приложение) может читать события.
 
-**Статус: каркас с двумя движками.** Микрофон читается, HTTP и MCP отвечают. Wake-word
-распознают два сменных движка: `vosk` (русская модель, ищет «привет петя» в распознанном тексте; `vosk-grammar` — ограниченная фразой грамматика) и
+**Статус: рабочий прототип.** Микрофон читается, HTTP и MCP отвечают; есть wake-word, офлайн-речь, голосовые записки и
+голосовая команда. Wake-word распознают сменные движки: `vosk` (русская модель, ищет «привет петя» в распознанном тексте; `vosk-grammar` — ограниченная фразой грамматика) и
 `mww:<имя>` (microWakeWord, пока английские тестовые модели). Выбор — на экране, через
 `POST /engine` или MCP `set_engine`; `none` отключает распознавание. Событие можно
 вызвать без голоса инструментом `simulate_wake`.
@@ -34,8 +34,16 @@ sherpa-onnx, на телефоне) и `system` / `system:<пакет>` (сис�
 WAV-файлом в `filesDir/notes` (на телефоне, не текстом) с индексом, поэтому очередь переживает перезапуск службы. Запись подтягивается
 по громкости (микрофон телефона тихий, речь около −50 дБ; усиление не больше 64 раз) и обрезается по краям. Не прослушанная записка живёт
 14 дней, прослушанная сутки, всего не больше 50. Пока идёт запись или звук, wake-word глух. Получатель сравнивается без учёта регистра.
-Экран «Записки: оставить и проиграть»; API: `POST /notes/record {"to","from","maxSeconds"}`, `/notes/record/stop`, `GET /notes[?to=&pending=1]`
-(кириллицу в строке запроса кодировать), `POST /notes/play {"id"|"to","announce"}`, `/notes/play/stop`, `/notes/delete {"id"}`;
+
+**Записка привязана к человеку, а не к имени.** Кроме подписей `to` и `from` она хранит постоянные ID получателя и отправителя из
+камеры (`toId`, `fromId`): переименование человека не меняет адресата, а «Тебе сообщение от …» называет отправителя его текущим именем.
+ID ставится сам: по адресату, у которого в книге адресатов есть `personId`, или явно (`toId`, `fromId` в `POST /notes/record`).
+Старой записке без ID его ставит главное приложение (`POST /notes/address {"id","toId","fromId"}`). Когда человек с телефона,
+обученного в другой системе, объединяется с человеком дома, `POST /people/merge {"from","into"}` переносит на новый ID его записки и
+его строку в книге адресатов.
+Экран «Записки: оставить и проиграть»; API: `POST /notes/record {"to","from","maxSeconds","toId","fromId"}`, `/notes/record/stop`, `GET /notes[?to=&pending=1]`
+(кириллицу в строке запроса кодировать; в ответе есть `toId`, `fromId`), `POST /notes/play {"id"|"to","announce"}`, `/notes/play/stop`,
+`/notes/delete {"id"}`, `/notes/address`, `/people/merge`;
 MCP: `record_note`, `stop_recording`, `list_notes`, `play_note`, `stop_note`, `delete_note`. События: `note_recording_started`,
 `note_recorded`, `note_record_failed` (`no_speech`, `too_short`, с `peakDbfs` и `thresholdDbfs`), `note_playing`, `note_played`,
 `note_play_failed`, `note_deleted`. Доставка по лицу делается в главном приложении.
@@ -47,10 +55,12 @@ MCP: `record_note`, `stop_recording`, `list_notes`, `play_note`, `stop_note`, `d
 `AutoGain`). Глагол обязателен: потом появятся другие команды. Адресат понимается в любом падеже («жене», «жену», «для жены»): слово
 должно совпасть с id или формой адресата или отличаться на одну правку при той же первой букве. Если назван только глагол, звучит
 «Кому?». Дальше ассистент говорит «Записка жене. Говорите.», записывает (сигнала нет, всё словами) и в конце говорит «Записано.»
-или причину («Ничего не слышно…», «Слишком коротко…»). Отправитель берётся из `POST /context {"person"}` (его присылает главное
-приложение, имя живёт 15 с). Адресаты (`GET|POST /recipients`, MCP `list_recipients`, `set_recipients`): роль («жена») с полем `person`
-(кем записка подписана в очереди, обычно имя из базы камеры); главное приложение само добавляет имена людей из базы камеры
-(`{"addNames":[...]}`). Проверить без голоса: `POST /command {"text":"передай жене"}` (MCP `run_command`). События:
+или причину («Ничего не слышно…», «Слишком коротко…»). Отправитель берётся из `POST /context {"person","personId"}` (его присылает главное
+приложение, живёт 15 с). Адресаты (`GET|POST /recipients`, MCP `list_recipients`, `set_recipients`): роль («жена») с полем `person`
+(кем записка подписана в очереди, обычно имя из базы камеры) или человек камеры с полем `personId`. Главное приложение само передаёт
+людей камеры по ID (`{"addPeople":[{"id","name"}]}`): новый человек добавляется в конец, переименованный остаётся на месте с новым
+именем (старые формы имени уходят, роли, подписанные старым именем, следуют за ним); прежний вариант `{"addNames":[...]}` тоже
+принимается. Проверить без голоса: `POST /command {"text":"передай жене"}` (MCP `run_command`). События:
 `command_listening`, `command_heard` (понятый текст), `command_note`, `command_timeout` (с `peakDbfs`, `utterances`, `lastPartial`),
 `command_failed`. `GET /speech` отдаёт `mode` (`command`, `recording`, `note` или пусто) для подписи на лице.
 
@@ -72,7 +82,7 @@ curl -H "Authorization: Bearer <код>" "http://<адрес>:8089/events?after=
 claude mcp add --transport http androsaur-audio http://<адрес>:8089/mcp --header "Authorization: Bearer <код>"
 ```
 
-MCP-инструменты: `status`, `recent_events`, `set_engine`, `simulate_wake`, `speak`, `stop_speaking`, `speech_status`, `set_speaker`, `speech_bench`, `record_note`, `stop_recording`, `list_notes`, `play_note`, `stop_note`, `delete_note`. Сервис объявляется в сети
+MCP-инструменты: `status`, `recent_events`, `set_engine`, `simulate_wake`, `speak`, `stop_speaking`, `speech_status`, `set_speaker`, `speech_bench`, `record_note`, `stop_recording`, `list_notes`, `play_note`, `stop_note`, `delete_note`, `list_recipients`, `set_recipients`, `run_command`. Сервис объявляется в сети
 как `_androsaur-audio._tcp`.
 
 Устройство и открытые вопросы — [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
