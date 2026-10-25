@@ -33,10 +33,11 @@ class AudioService : Service() {
     private val factory by lazy { EngineFactory(this) }
     private var server: PhoneServer? = null
     val speech by lazy { SpeechController(this, prefs) { type, data -> record(type, *data) } }
-    val notes by lazy { NoteController(this, { microphone }, speech) { type, data -> record(type, *data) } }
+    val notes by lazy { NoteController(this, { microphone }, speech, { recipients.all() }) { type, data -> record(type, *data) } }
     val recipients by lazy { RecipientBook(prefs) }
     /** Who the camera sees now, pushed by the main app; a note left by voice is filed as «from» this person while the push is fresh. */
     @Volatile private var personName: String? = null
+    @Volatile private var personId: String? = null
     @Volatile private var personAt = 0L
     /** What the assistant waits for or does besides speaking, for the face: `command` (listening for a command), `recording` (a note is being recorded), `note` (a note plays), or empty. */
     fun mode(): String = when {
@@ -45,9 +46,10 @@ class AudioService : Service() {
         commands.listening -> "command"
         else -> ""
     }
-    fun setPerson(name: String?) { personName = name?.trim()?.ifEmpty { null }; personAt = SystemClock.elapsedRealtime() }
+    fun setPerson(name: String?, id: String? = null) { personName = name?.trim()?.ifEmpty { null }; personId = id?.trim()?.ifEmpty { null }; personAt = SystemClock.elapsedRealtime() }
     private fun person(): String? = personName?.takeIf { SystemClock.elapsedRealtime() - personAt < PERSON_FRESH_MS }
-    val commands by lazy { CommandListener({ words -> factory.commandRecognizer(words) }, { microphone }, recipients, speech, notes, ::person) { type, data -> record(type, *data) } }
+    private fun currentPersonId(): String? = personId?.takeIf { SystemClock.elapsedRealtime() - personAt < PERSON_FRESH_MS }
+    val commands by lazy { CommandListener({ words -> factory.commandRecognizer(words) }, { microphone }, recipients, speech, notes, ::person, ::currentPersonId) { type, data -> record(type, *data) } }
     private val nsd by lazy { NsdAdvertiser(this) }
     @Volatile private var lastWakeAt = 0L
     private val wakes = java.util.concurrent.atomic.AtomicLong()

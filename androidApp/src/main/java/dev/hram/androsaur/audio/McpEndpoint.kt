@@ -124,7 +124,7 @@ class McpEndpoint(private val audio: AudioService) {
         "set_recipients" -> {
             val list = args.optJSONArray("recipients") ?: JSONArray()
             val problem = audio.recipients.replace(List(list.length()) { i -> list.getJSONObject(i).let { o ->
-                dev.hram.androsaur.audio.command.Recipient(o.getString("id"), o.optJSONArray("forms")?.let { f -> List(f.length()) { f.getString(it) } } ?: emptyList(), o.optString("person").ifEmpty { null }) } })
+                dev.hram.androsaur.audio.command.Recipient(o.getString("id"), o.optJSONArray("forms")?.let { f -> List(f.length()) { f.getString(it) } } ?: emptyList(), o.optString("person").ifEmpty { null }, o.optString("personId").ifEmpty { null }) } })
             result(if (problem == null) JSONObject().put("ok", true) else JSONObject().put("error", problem), error = problem != null)
         }
         "run_command" -> result(audio.commands.run(args.optString("text")))

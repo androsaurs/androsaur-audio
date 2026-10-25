@@ -2,11 +2,49 @@ package dev.hram.androsaur.audio.command
 
 /**
  * Somebody a note can be left for. [id] is what the person is called («жена», «Маша»); [forms] are extra spoken forms;
- * [person] is who the notes are filed under when it differs from [id] («жена» is filed under «Маша», the name the camera knows).
+ * [person] is who the notes are filed under when it differs from [id] («жена» is filed under «Маша», the name the camera knows);
+ * [personId] is the camera's permanent id of the person, so a note stays theirs when they are renamed.
  */
-data class Recipient(val id: String, val forms: List<String> = emptyList(), val person: String? = null) {
+data class Recipient(val id: String, val forms: List<String> = emptyList(), val person: String? = null, val personId: String? = null) {
     /** The name a note for this recipient is addressed to. */
     val addressee: String get() = person?.takeIf { it.isNotBlank() } ?: id
+
+    companion object {
+        /**
+         * [list] brought up to date with the people the camera knows, as (permanent id, current name). A person already in the
+         * list keeps their place and takes the current name (a rename: the old spoken forms go, and roles filed under the old
+         * name follow); a name in the list without an id gets the id; a new person is added at the end while there is room
+         * ([max]). Returns the new list and how many entries changed.
+         */
+        fun withPeople(list: List<Recipient>, people: List<Pair<String, String>>, max: Int): Pair<List<Recipient>, Int> {
+            val out = list.toMutableList()
+            var changed = 0
+            for ((personId, raw) in people) {
+                val name = raw.trim()
+                if (name.isEmpty() || personId.isBlank()) continue
+                val mine = out.indexOfFirst { it.personId == personId }
+                if (mine >= 0) {
+                    val old = out[mine].id
+                    if (old != name) {
+                        out[mine] = out[mine].copy(id = name, forms = emptyList()); changed++
+                        for (i in out.indices) if (out[i].person.equals(old, ignoreCase = true)) out[i] = out[i].copy(person = name)
+                    }
+                    continue
+                }
+                val legacy = out.indexOfFirst { it.personId == null && it.person == null && it.id.equals(name, ignoreCase = true) }
+                if (legacy >= 0) { out[legacy] = out[legacy].copy(personId = personId); changed++; continue }
+                if (out.size >= max) continue
+                out += Recipient(name, personId = personId); changed++
+            }
+            return out to changed
+        }
+
+        /** [list] where the person [from] is the person [into]: their entry takes the id, or goes when [into] has one already. */
+        fun merged(list: List<Recipient>, from: String, into: String): List<Recipient> {
+            val hasInto = list.any { it.personId == into }
+            return list.mapNotNull { r -> if (r.personId != from) r else if (hasInto) null else r.copy(personId = into) }
+        }
+    }
 }
 
 /** What was understood from a spoken command. [recipient] is null when the verb was heard but not for whom. */

@@ -27,6 +27,8 @@ class NoteController(
     context: Context,
     private val microphone: () -> MicrophoneListener?,
     private val speech: SpeechController,
+    /** The recipient book: who is who by permanent id, to file a note under the person and to say the current name of who left it. */
+    private val people: () -> List<dev.hram.androsaur.audio.command.Recipient>,
     private val record: (String, Array<Pair<String, String>>) -> Unit,
 ) {
     private val store = NoteStore(context)
@@ -44,10 +46,12 @@ class NoteController(
      * [beep] says when to talk with a sound; a caller that tells it in words passes false. [onDone] is called when the recording
      * ends, with null when a note was saved or the reason it was not (`no_speech`, `too_short`, `microphone_lost`, ...).
      */
-    fun startRecording(toText: String, fromText: String?, maxSeconds: Int?, beep: Boolean = true, onDone: ((String?) -> Unit)? = null): String? {
+    fun startRecording(toText: String, fromText: String?, maxSeconds: Int?, beep: Boolean = true, toId: String? = null, fromId: String? = null, onDone: ((String?) -> Unit)? = null): String? {
         val to = Recipient.normalize(toText) ?: return "empty_recipient"
         if (to.length > MAX_NAME) return "recipient_too_long"
         val from = fromText?.trim().orEmpty().take(MAX_NAME)
+        // A note for a name is filed under that person's id, so a later rename does not change whom it is for.
+        val forId = toId?.takeIf { it.isNotBlank() } ?: people().firstOrNull { r -> r.personId != null && Recipient.normalize(r.id) == to }?.personId
         val limitMs = (maxSeconds ?: 60) * 1000L
         if (limitMs !in 3_000..MAX_RECORD_MS) return "invalid_max_seconds"
         val mic = microphone() ?: return "microphone_unavailable"
@@ -56,14 +60,14 @@ class NoteController(
             phase = "recording"; stopRequested = false
         }
         micMutedUntil = Long.MAX_VALUE
-        Thread({ recordNote(mic, to, from, limitMs, beep, onDone) }, "notes-record").start()
+        Thread({ recordNote(mic, to, from, limitMs, beep, forId, fromId?.takeIf { it.isNotBlank() }, onDone) }, "notes-record").start()
         return null
     }
 
     /** Ends the recording now; what was said so far is kept. */
     fun stopRecording(): Boolean { if (phase != "recording") return false; stopRequested = true; return true }
 
-    private fun recordNote(mic: MicrophoneListener, to: String, from: String, limitMs: Long, beep: Boolean, onDone: ((String?) -> Unit)?) {
+    private fun recordNote(mic: MicrophoneListener, to: String, from: String, limitMs: Long, beep: Boolean, toId: String?, fromId: String?, onDone: ((String?) -> Unit)?) {
         record("note_recording_started", arrayOf("to" to to))
         var reason: String? = null
         var peakText = ""
@@ -105,7 +109,7 @@ class NoteController(
                 val loud = Loudness.process(samples, mic.sampleRate, gate.speechStartMs, gate.speechEndMs)
                 val bytes = ByteArray(loud.size * 2).also { b -> loud.forEachIndexed { i, v -> b[2 * i] = v.toByte(); b[2 * i + 1] = (v.toInt() shr 8).toByte() } }
                 val wav = Wav.header(bytes.size, mic.sampleRate) + bytes
-                val note = store.add(to, from, wav, Wav.durationMs(bytes.size, mic.sampleRate))
+                val note = store.add(to, from, wav, Wav.durationMs(bytes.size, mic.sampleRate), toId, fromId)
                 record("note_recorded", arrayOf("id" to note.id, "to" to to, "durationMs" to note.durationMs.toString(),
                     "end" to (if (v == RecordingGate.Verdict.LIMIT) "limit" else if (v == null) "stopped" else "pause")))
             }
@@ -146,7 +150,9 @@ class NoteController(
         var reason: String? = null
         try {
             if (announce) {
-                val text = if (note.from.isEmpty()) "Тебе сообщение." else "Тебе сообщение от ${note.from}."
+                // The current name of who left it: they may have been renamed since.
+                val from = note.fromId?.let { id -> people().firstOrNull { it.personId == id }?.id } ?: note.from
+                val text = if (from.isEmpty()) "Тебе сообщение." else "Тебе сообщение от $from."
                 // A speech failure should not lose the note: play it anyway.
                 speech.speakAndWait(text)
                 micMutedUntil = Long.MAX_VALUE
@@ -212,6 +218,10 @@ class NoteController(
         }
     }
 
+    fun readdress(from: String, into: String): Int = store.readdress(from, into)
+
+    fun address(id: String, toId: String?, fromId: String?): Boolean = store.address(id, toId?.ifBlank { null }, fromId?.ifBlank { null })
+
     fun delete(id: String): Boolean = store.delete(id).also { if (it) record("note_deleted", arrayOf("id" to id)) }
 
     /** The notes (without sound), optionally for one person and only the ones still waiting. */
@@ -220,7 +230,8 @@ class NoteController(
         val array = JSONArray()
         store.all().filter { (to == null || it.to == to) && (!pendingOnly || it.heardAtMs == null) }.sortedBy { it.createdAtMs }.forEach {
             array.put(JSONObject().put("id", it.id).put("to", it.to).put("from", it.from).put("createdAtMs", it.createdAtMs)
-                .put("durationMs", it.durationMs).put("heard", it.heardAtMs != null))
+                .put("durationMs", it.durationMs).put("heard", it.heardAtMs != null)
+                .put("toId", it.toId ?: JSONObject.NULL).put("fromId", it.fromId ?: JSONObject.NULL))
         }
         return array
     }

@@ -13,6 +13,13 @@ data class Note(
     val durationMs: Long,
     /** When it was played to the recipient, or null while it waits. */
     val heardAtMs: Long? = null,
+    /**
+     * The permanent id of the person the note is for (the camera's id), or null for a role («жена») or a note made before ids.
+     * The note belongs to this person whatever they are called later; [to] is only the name it was left under.
+     */
+    val toId: String? = null,
+    /** The permanent id of who left it, or null when unknown; [from] is the name they had then. */
+    val fromId: String? = null,
 )
 
 object Recipient {

@@ -22,6 +22,8 @@ class CommandListener(
     private val notes: NoteController,
     /** The name of the person the camera sees now (from the main app), or null. */
     private val person: () -> String?,
+    /** The permanent id of that person, or null. */
+    private val personId: () -> String?,
     private val record: (String, Array<Pair<String, String>>) -> Unit,
 ) {
     @Volatile var listening = false; private set
@@ -100,7 +102,7 @@ class CommandListener(
         val recipient = command.recipient ?: return
         // Told in words, step by step: whom the note is for, that it is time to talk, and in the end whether it was kept.
         speech.speakAndWait((command.echo() ?: "Записка") + ". Говорите.")
-        val problem = notes.startRecording(recipient.addressee, person(), null, beep = false) { reason ->
+        val problem = notes.startRecording(recipient.addressee, person(), null, beep = false, toId = recipient.personId, fromId = personId()) { reason ->
             speech.speakAndWait(when (reason) {
                 null -> "Записано."
                 "no_speech" -> "Ничего не слышно. Записка не сохранена."

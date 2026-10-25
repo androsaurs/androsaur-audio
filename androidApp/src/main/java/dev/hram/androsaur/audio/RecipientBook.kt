@@ -11,7 +11,8 @@ class RecipientBook(private val prefs: SharedPreferences) {
         val array = JSONArray(prefs.getString(KEY, "[]"))
         List(array.length()) { i ->
             val o = array.getJSONObject(i)
-            Recipient(o.getString("id"), o.optJSONArray("forms")?.let { f -> List(f.length()) { f.getString(it) } } ?: emptyList(), o.optString("person").ifEmpty { null })
+            Recipient(o.getString("id"), o.optJSONArray("forms")?.let { f -> List(f.length()) { f.getString(it) } } ?: emptyList(), o.optString("person").ifEmpty { null },
+                o.optString("personId").ifEmpty { null })
         }
     }.getOrDefault(emptyList())
 
@@ -21,7 +22,7 @@ class RecipientBook(private val prefs: SharedPreferences) {
         if (list.any { it.id.isBlank() || it.id.length > 40 || it.forms.size > 10 || it.forms.any { f -> f.length > 40 } }) return "invalid_recipient"
         val array = JSONArray()
         list.forEach { r ->
-            array.put(JSONObject().put("id", r.id.trim()).put("forms", JSONArray(r.forms)).apply { r.person?.let { put("person", it) } })
+            array.put(JSONObject().put("id", r.id.trim()).put("forms", JSONArray(r.forms)).apply { r.person?.let { put("person", it) }; r.personId?.let { put("personId", it) } })
         }
         prefs.edit().putString(KEY, array.toString()).apply()
         return null
@@ -37,9 +38,29 @@ class RecipientBook(private val prefs: SharedPreferences) {
         return fresh.size
     }
 
+    /**
+     * The people the camera knows, as (permanent id, current name). A person already in the list keeps their place and takes
+     * the current name (a rename; the old spoken forms go, and roles filed under the old name follow); a name in the list
+     * without an id gets the id; a new person is added at the end. Returns how many entries changed.
+     */
+    fun addPeople(people: List<Pair<String, String>>): Int {
+        val have = all()
+        val (list, changed) = Recipient.withPeople(have, people, MAX)
+        if (changed > 0) replace(list)
+        return changed
+    }
+
+    /** The person [from] is the person [into]: their entry takes the id, or goes when [into] has one already. */
+    fun merge(from: String, into: String): Boolean {
+        val have = all()
+        val merged = Recipient.merged(have, from, into)
+        if (merged != have) replace(merged)
+        return merged != have
+    }
+
     fun toJson(): JSONArray {
         val array = JSONArray()
-        all().forEach { r -> array.put(JSONObject().put("id", r.id).put("forms", JSONArray(r.forms)).apply { r.person?.let { put("person", it) } }) }
+        all().forEach { r -> array.put(JSONObject().put("id", r.id).put("forms", JSONArray(r.forms)).apply { r.person?.let { put("person", it) }; r.personId?.let { put("personId", it) } }) }
         return array
     }
 
