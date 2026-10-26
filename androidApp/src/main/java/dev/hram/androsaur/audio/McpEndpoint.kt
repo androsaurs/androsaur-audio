@@ -55,7 +55,7 @@ class McpEndpoint(private val audio: AudioService) {
         .put(tool("list_notes", "Voice notes (without the sound): id, to, from, createdAtMs, durationMs, heard. Oldest first.",
             schema(props = mapOf("to" to prop("string", "Only notes for this person."), "pending" to prop("boolean", "Only notes nobody has heard yet."))), readOnly = true))
         .put(tool("play_note", "Play a voice note aloud: the one with id, or the oldest waiting for the person in to. First says «Тебе сообщение от <from>» unless announce is false. A note played to the end is marked heard (it can still be played by id for a day). Returns at once; watch note_played / note_play_failed. Errors: not_found, no_notes, nothing_to_play, empty_recipient, busy:<what>.",
-            schema(props = mapOf("id" to prop("string", "Note id."), "to" to prop("string", "Play the oldest waiting note for this person."),
+            schema(props = mapOf("original" to prop("boolean", "Play the recording even when the note has a transcription from the hub (then it is normally said by speech synthesis)."), "id" to prop("string", "Note id."), "to" to prop("string", "Play the oldest waiting note for this person."),
                 "announce" to prop("boolean", "Say who it is from first. Default true.")))))
         .put(tool("stop_note", "Cut the note that is playing short (it stays waiting).", schema()))
         .put(tool("delete_note", "Delete a voice note by id.", schema(props = mapOf("id" to prop("string", "Note id.")), required = listOf("id"))))
@@ -115,7 +115,7 @@ class McpEndpoint(private val audio: AudioService) {
         "stop_recording" -> result(JSONObject().put("ok", audio.notes.stopRecording()))
         "list_notes" -> result(JSONObject().put("notes", audio.notes.list(args.optString("to").ifEmpty { null }, args.optBoolean("pending"))))
         "play_note" -> {
-            val problem = audio.notes.play(args.optString("id").ifEmpty { null }, args.optString("to").ifEmpty { null }, args.optBoolean("announce", true))
+            val problem = audio.notes.play(args.optString("id").ifEmpty { null }, args.optString("to").ifEmpty { null }, args.optBoolean("announce", true), args.optBoolean("original"))
             result(if (problem == null) JSONObject().put("ok", true) else JSONObject().put("error", problem), error = problem != null)
         }
         "stop_note" -> { audio.notes.stopPlaying(); result(JSONObject().put("ok", true)) }

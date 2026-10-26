@@ -68,7 +68,18 @@ class PiperSpeaker(private val context: Context, private val voice: String, thre
                 if (stopped) 0 else 1
             }
             val synthMs = SystemClock.elapsedRealtime() - began
-            while (!stopped && (track.playbackHeadPosition.toLong() and 0xffffffffL) < written) Thread.sleep(20)
+            // A stream track starts playing only when its buffer is full: a phrase shorter than the buffer («Кому?») never sounded
+            // and the wait below never ended. The rest of the buffer is filled with silence, and the wait has a limit.
+            val pad = FloatArray(track.bufferSizeInFrames)
+            var padded = 0
+            val padUntil = SystemClock.elapsedRealtime() + 1000
+            while (!stopped && padded < pad.size && SystemClock.elapsedRealtime() < padUntil) {
+                val n = track.write(pad, padded, pad.size - padded, AudioTrack.WRITE_NON_BLOCKING)
+                if (n < 0) break
+                if (n == 0) Thread.sleep(5) else padded += n
+            }
+            val deadline = SystemClock.elapsedRealtime() + written * 1000 / rate + 2000
+            while (!stopped && (track.playbackHeadPosition.toLong() and 0xffffffffL) < written && SystemClock.elapsedRealtime() < deadline) Thread.sleep(20)
             return SpeechTiming(synthMs = synthMs, audioMs = written * 1000 / rate, firstAudioMs = firstAudioMs)
         } finally {
             ticking.set(false)

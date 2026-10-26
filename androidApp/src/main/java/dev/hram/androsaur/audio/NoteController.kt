@@ -128,7 +128,11 @@ class NoteController(
      * Plays a note: the one with [id], or the oldest waiting for [toText]. With [announce] the assistant first says who it is from.
      * Returns an error code, or null when it has started; a note that was played is marked heard.
      */
-    fun play(id: String?, toText: String?, announce: Boolean): String? {
+    /**
+     * [original]: play the recording even when there is a transcription («повтори записку» — the person's own voice; the synthesis
+     * may have twisted a name).
+     */
+    fun play(id: String?, toText: String?, announce: Boolean, original: Boolean = false): String? {
         val note = when {
             id != null -> store.get(id) ?: return "not_found"
             toText != null -> NoteBook.pendingFor(store.all(), Recipient.normalize(toText) ?: return "empty_recipient").firstOrNull() ?: return "no_notes"
@@ -139,16 +143,44 @@ class NoteController(
             phase = "playing"; stopRequested = false
         }
         micMutedUntil = Long.MAX_VALUE
-        Thread({ playNote(note, announce) }, "notes-play").start()
+        Thread({ playNote(note, announce, original) }, "notes-play").start()
         return null
     }
 
-    fun stopPlaying() { if (phase == "playing") { stopRequested = true; track?.let { runCatching { it.pause(); it.flush() } } } }
+    fun stopPlaying() {
+        if (phase != "playing") return
+        stopRequested = true
+        track?.let { runCatching { it.pause(); it.flush() } }
+        if (speakingNote) speech.stop()
+    }
 
-    private fun playNote(note: Note, announce: Boolean) {
-        record("note_playing", arrayOf("id" to note.id, "to" to note.to, "announce" to announce.toString()))
+    @Volatile private var speakingNote = false
+
+    /** The sound of a note as a WAV file, for the main app to hand to the hub. */
+    fun audio(id: String): ByteArray? = store.get(id)?.let { store.file(it.id).takeIf { f -> f.exists() }?.readBytes() }
+
+    fun setText(id: String, text: String?): Boolean = store.setText(id, text)
+
+    private fun playNote(note: Note, announce: Boolean, original: Boolean) {
+        val asText = !original && note.text != null
+        record("note_playing", arrayOf("id" to note.id, "to" to note.to, "announce" to announce.toString(), "as" to if (asText) "text" else "recording"))
         var reason: String? = null
         try {
+            if (asText) {
+                // Transcribed by the hub: said by the synthesis, with who left it.
+                val from = note.fromId?.let { id -> people().firstOrNull { it.personId == id }?.id } ?: note.from
+                val lead = if (from.isEmpty()) "Тебе сообщение" else "Тебе сообщение от $from"
+                speakingNote = true
+                val problem = speech.speakAndWait("$lead: ${note.text}")
+                speakingNote = false
+                if (problem == null) {
+                    if (!stopRequested) store.markHeard(note.id)
+                    record("note_played", arrayOf("id" to note.id, "to" to note.to, "complete" to (!stopRequested).toString(), "as" to "text"))
+                    return
+                }
+                // The synthesis failed: the recording is still there, play it.
+                record("note_text_failed", arrayOf("id" to note.id, "reason" to problem))
+            }
             if (announce) {
                 // The current name of who left it: they may have been renamed since.
                 val from = note.fromId?.let { id -> people().firstOrNull { it.personId == id }?.id } ?: note.from
@@ -240,7 +272,7 @@ class NoteController(
         store.all().filter { (to == null || it.to == to) && (!pendingOnly || it.heardAtMs == null) }.sortedBy { it.createdAtMs }.forEach {
             array.put(JSONObject().put("id", it.id).put("to", it.to).put("from", it.from).put("createdAtMs", it.createdAtMs)
                 .put("durationMs", it.durationMs).put("heard", it.heardAtMs != null)
-                .put("toId", it.toId ?: JSONObject.NULL).put("fromId", it.fromId ?: JSONObject.NULL))
+                .put("toId", it.toId ?: JSONObject.NULL).put("fromId", it.fromId ?: JSONObject.NULL).put("hasText", it.text != null))
         }
         return array
     }

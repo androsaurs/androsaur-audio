@@ -6,6 +6,8 @@ import dev.hram.androsaur.audio.command.CommandParser
 import dev.hram.androsaur.audio.command.Declension
 import dev.hram.androsaur.audio.command.QuickCommand
 import dev.hram.androsaur.audio.command.QuickCommands
+import dev.hram.androsaur.audio.wake.PhraseMatcher
+import dev.hram.androsaur.audio.wake.WakePhrase
 import org.json.JSONObject
 import org.vosk.Recognizer
 import java.util.concurrent.LinkedBlockingQueue
@@ -14,7 +16,8 @@ import java.util.concurrent.TimeUnit
 /**
  * What the assistant does after the wake word: for a few seconds it listens for a command («передай жене…»), with its own speech
  * recognizer (the wake engine rests meanwhile). A command is turned into action here: the assistant repeats whom the note is for
- * and starts recording it. If only the verb was heard, it asks «Кому?» and listens once more.
+ * and starts recording it. If only the verb was heard, it asks «Кому?» and listens once more. The wake phrase heard again in the
+ * window («железяка!» once more, as children do when the answer is slow) is a new call: the window closes and [onRewake] starts over.
  */
 class CommandListener(
     private val recognizer: (grammarWords: List<String>) -> Recognizer,
@@ -28,6 +31,10 @@ class CommandListener(
     /** The permanent id of that person, or null. */
     private val personId: () -> String?,
     private val record: (String, Array<Pair<String, String>>) -> Unit,
+    /** The wake phrase now, in [WakePhrase] syntax. */
+    private val wakePhrase: () -> String = { WakePhrase.DEFAULT },
+    /** Called with what was heard when the wake phrase came again in the window, after the window closed. */
+    private val onRewake: (String) -> Unit = {},
 ) {
     @Volatile var listening = false; private set
     @Volatile var enabled = true
@@ -57,7 +64,10 @@ class CommandListener(
 
     private fun listen(mic: MicrophoneListener) {
         // The recognizer knows only the command words and the recipients in every case, so it cannot turn «передай» into «передвижения».
-        val words = (CommandParser.vocabulary + QuickCommands.vocabulary + recipients.all().flatMap { r -> (listOf(r.id) + r.forms).flatMap { Declension.forms(it) } }).distinct()
+        val phrase = wakePhrase()
+        val wake = PhraseMatcher(phrase)
+        val wakeWords = WakePhrase.grammarPhrases(phrase).flatMap { it.split(' ') }
+        val words = (CommandParser.vocabulary + QuickCommands.vocabulary + wakeWords + recipients.all().flatMap { r -> (listOf(r.id) + r.forms).flatMap { Declension.forms(it) } }).distinct()
         val rec = try { recognizer(words) } catch (e: Exception) { record("command_failed", arrayOf("reason" to "${e.javaClass.simpleName}: ${e.message}".take(120))); listening = false; return }
         val frames = LinkedBlockingQueue<ShortArray>(64)
         var verbSeen = false
@@ -66,6 +76,7 @@ class CommandListener(
         var finals = 0
         var partial = ""
         var deadline = SystemClock.elapsedRealtime() + WINDOW_MS
+        var rewake: String? = null
         record("command_listening", emptyArray())
         mic.commandTap = { frame -> frames.offer(frame) }
         try {
@@ -74,9 +85,15 @@ class CommandListener(
                 peak = maxOf(peak, dev.hram.androsaur.audio.level.AudioLevel.dbfs(raw))
                 val frame = gain.apply(raw)
                 val final = rec.acceptWaveForm(frame, frame.size)
-                if (!final) { JSONObject(rec.partialResult).optString("partial").takeIf { it.isNotEmpty() }?.let { partial = it }; continue }
+                val heard = if (final) JSONObject(rec.result).optString("text") else JSONObject(rec.partialResult).optString("partial")
+                if (wake.matches(heard)) {
+                    record("command_rewake", arrayOf("text" to heard.take(120)))
+                    rewake = heard
+                    break
+                }
+                if (!final) { heard.takeIf { it.isNotEmpty() }?.let { partial = it }; continue }
                 finals++
-                val text = JSONObject(rec.result).optString("text")
+                val text = heard
                 if (text.isEmpty()) continue
                 val quick = if (verbSeen) null else QuickCommands.parse(text)
                 if (quick != null) {
@@ -101,7 +118,7 @@ class CommandListener(
                 }
             }
             // What the recognizer made of the window, so a failure can be told from silence: the loudest frame, how many utterances ended, the last partial text.
-            record("command_timeout", arrayOf("peakDbfs" to Math.round(peak).toString(), "utterances" to finals.toString(), "lastPartial" to partial.take(80)))
+            if (rewake == null) record("command_timeout", arrayOf("peakDbfs" to Math.round(peak).toString(), "utterances" to finals.toString(), "lastPartial" to partial.take(80)))
         } catch (e: Exception) {
             record("command_failed", arrayOf("reason" to "${e.javaClass.simpleName}: ${e.message}".take(120)))
         } finally {
@@ -109,6 +126,7 @@ class CommandListener(
             rec.close()
             listening = false
         }
+        rewake?.let(onRewake)
     }
 
     /**
@@ -128,7 +146,8 @@ class CommandListener(
                     personId() == null && person() == null -> speech.speakAndWait("Не вижу, кто спрашивает.")
                     note == null -> speech.speakAndWait("Записок для тебя нет.")
                     else -> {
-                        val problem = notes.play(note.id, null, true)
+                        // The person's own voice, even when the note was delivered as text.
+                        val problem = notes.play(note.id, null, true, original = true)
                         record("command", arrayOf("intent" to "repeat_note", "note" to note.id) + (problem?.let { arrayOf("reason" to it) } ?: emptyArray()))
                     }
                 }
@@ -137,6 +156,7 @@ class CommandListener(
             is QuickCommand.Weather -> record("command", arrayOf("intent" to if (command.tomorrow) "weather_tomorrow" else "weather"))
             is QuickCommand.Timer -> record("command", arrayOf("intent" to "timer", "seconds" to command.seconds.toString()))
             QuickCommand.TimerLeft -> record("command", arrayOf("intent" to "timer_left"))
+            is QuickCommand.Calc -> record("command", arrayOf("intent" to "calc", "expression" to command.expression))
         }
         listening = false
     }
@@ -144,7 +164,7 @@ class CommandListener(
     private fun name(q: QuickCommand): String = when (q) {
         QuickCommand.Time -> "time"; is QuickCommand.Weather -> if (q.tomorrow) "weather_tomorrow" else "weather"
         is QuickCommand.Timer -> "timer"; QuickCommand.TimerLeft -> "timer_left"; QuickCommand.Stop -> "stop"
-        QuickCommand.RepeatNote -> "repeat_note"
+        QuickCommand.RepeatNote -> "repeat_note"; is QuickCommand.Calc -> "calc"
     }
 
     /** Says whom the note is for and starts recording it. */

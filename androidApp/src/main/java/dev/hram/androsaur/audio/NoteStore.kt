@@ -46,6 +46,14 @@ class NoteStore(context: Context) {
         true
     }
 
+    /** Keeps the transcription of a note (from the hub). False when there is no such note. */
+    fun setText(id: String, text: String?): Boolean = synchronized(lock) {
+        val before = read()
+        if (before.none { it.id == id }) return false
+        write(before.map { if (it.id == id) it.copy(text = text?.trim()?.ifEmpty { null }) else it })
+        true
+    }
+
     /** Notes for or from the person [from] now belong to [into] (the same person under the house's id). Returns how many changed. */
     fun readdress(from: String, into: String): Int = synchronized(lock) {
         val before = read()
@@ -72,7 +80,8 @@ class NoteStore(context: Context) {
         List(array.length()) { i ->
             val o = array.getJSONObject(i)
             Note(o.getString("id"), o.getString("to"), o.optString("from"), o.getLong("createdAtMs"), o.getLong("durationMs"),
-                if (o.has("heardAtMs")) o.getLong("heardAtMs") else null, o.optString("toId").ifEmpty { null }, o.optString("fromId").ifEmpty { null })
+                if (o.has("heardAtMs")) o.getLong("heardAtMs") else null, o.optString("toId").ifEmpty { null }, o.optString("fromId").ifEmpty { null },
+                o.optString("text").ifEmpty { null })
         }.filter { file(it.id).exists() }
     } catch (_: Exception) { emptyList() }
 
@@ -81,7 +90,7 @@ class NoteStore(context: Context) {
         notes.forEach {
             array.put(JSONObject().put("id", it.id).put("to", it.to).put("from", it.from).put("createdAtMs", it.createdAtMs)
                 .put("durationMs", it.durationMs).apply {
-                    it.heardAtMs?.let { h -> put("heardAtMs", h) }; it.toId?.let { v -> put("toId", v) }; it.fromId?.let { v -> put("fromId", v) }
+                    it.heardAtMs?.let { h -> put("heardAtMs", h) }; it.toId?.let { v -> put("toId", v) }; it.fromId?.let { v -> put("fromId", v) }; it.text?.let { v -> put("text", v) }
                 })
         }
         val tmp = File(dir, "index.json.tmp")

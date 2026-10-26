@@ -9,6 +9,8 @@ import org.json.JSONObject
 import org.vosk.Model
 import org.vosk.Recognizer
 import java.io.File
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import java.util.zip.ZipInputStream
 
 /**
@@ -30,22 +32,51 @@ class VoskEngine(
     override val frameLength = 512
     private val matcher = PhraseMatcher(phrase)
     @Volatile override var lastHeard: String? = null; private set
-    private val recognizer =
+    private val make = {
         if (grammar) Recognizer(model, sampleRate.toFloat(), JSONArray(WakePhrase.grammarPhrases(phrase) + "[unk]").toString())
         else Recognizer(model, sampleRate.toFloat())
+    }
+    private var recognizer = make()
+    /** The next recognizer, built in the background so the microphone thread never waits for it. */
+    @Volatile private var spare: Recognizer? = null
+    private val worker = Executors.newSingleThreadExecutor { Thread(it, "vosk-spare") }
+
+    init { prepare() }
 
     override fun process(frame: ShortArray): Boolean {
         val final = recognizer.acceptWaveForm(frame, frame.size)
         val json = JSONObject(if (final) recognizer.result else recognizer.partialResult)
         val text = json.optString(if (final) "text" else "partial")
         if (final && text.isNotEmpty()) onUtterance(text)
-        if (!matcher.matches(text)) return false
-        lastHeard = text
-        recognizer.reset()
-        return true
+        val hit = matcher.matches(text)
+        if (hit) lastHeard = text
+        if (hit || (final && text.isNotEmpty())) renew()
+        return hit
     }
 
-    override fun close() = recognizer.close()
+    /**
+     * A clean recognizer for the next utterance. Vosk adapts to the voice it has been hearing, and reset() keeps that: after a
+     * grown-up talked, a child's «железяка» right after was missed (2 of 5 in one stream, 5 of 5 with a new recognizer per
+     * utterance, no false wakes on recorded background talk). Without a spare ready yet, it falls back to reset().
+     */
+    private fun renew() {
+        val next = spare
+        if (next == null) { recognizer.reset(); return }
+        spare = null
+        val old = recognizer
+        recognizer = next
+        worker.execute { old.close() }
+        prepare()
+    }
+
+    private fun prepare() = runCatching { worker.execute { if (spare == null) spare = make() } }
+
+    override fun close() {
+        worker.shutdown()
+        worker.awaitTermination(2, TimeUnit.SECONDS)
+        spare?.close()
+        recognizer.close()
+    }
 }
 
 /** Unpacks the model zip from assets on first use and keeps one loaded [Model] for the service's lifetime. */

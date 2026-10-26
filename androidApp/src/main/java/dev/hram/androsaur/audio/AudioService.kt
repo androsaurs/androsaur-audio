@@ -50,7 +50,8 @@ class AudioService : Service() {
     private fun person(): String? = personName?.takeIf { SystemClock.elapsedRealtime() - personAt < PERSON_FRESH_MS }
     private fun currentPersonId(): String? = personId?.takeIf { SystemClock.elapsedRealtime() - personAt < PERSON_FRESH_MS }
     val ringer by lazy { Ringer { type, data -> record(type, *data) } }
-    val commands by lazy { CommandListener({ words -> factory.commandRecognizer(words) }, { microphone }, recipients, speech, notes, ringer, ::person, ::currentPersonId) { type, data -> record(type, *data) } }
+    val commands by lazy { CommandListener({ words -> factory.commandRecognizer(words) }, { microphone }, recipients, speech, notes, ringer, ::person, ::currentPersonId,
+        { type, data -> record(type, *data) }, { phrase }, { heard -> onWake(synchronized(engineLock) { spec.id }, heard) }) }
     private val nsd by lazy { NsdAdvertiser(this) }
     @Volatile private var lastWakeAt = 0L
     private val wakes = java.util.concurrent.atomic.AtomicLong()
@@ -128,6 +129,66 @@ class AudioService : Service() {
         super.onDestroy()
     }
 
+    /**
+     * The microphone: Android's audio source, the amplification before the wake engine, and the recognition debug mode for
+     * [debugMinutes] (0 switches it off), and the [quiet] test inside it. Source and gain restart the microphone. Returns an error code, or null.
+     */
+    fun setMicrophone(source: String?, wakeGain: Boolean?, debugMinutes: Int?, quiet: Boolean? = null): String? {
+        if (source != null && source !in MicrophoneListener.Sources.ALL) return "unknown_source"
+        if (debugMinutes != null && debugMinutes !in 0..720) return "invalid_debug_minutes"
+        prefs.edit().apply {
+            source?.let { putString(KEY_MIC_SOURCE, it) }
+            wakeGain?.let { putBoolean(KEY_WAKE_GAIN, it) }
+            debugMinutes?.let { putLong(KEY_DEBUG_UNTIL, if (it == 0) 0L else System.currentTimeMillis() + it * 60_000L) }
+            quiet?.let { putBoolean(KEY_QUIET, it) }
+        }.apply()
+        record("microphone_set", "source" to (prefs.getString(KEY_MIC_SOURCE, null) ?: MicrophoneListener.Sources.DEFAULT),
+            "wakeGain" to prefs.getBoolean(KEY_WAKE_GAIN, false).toString(), "debugMinutes" to (debugMinutes?.toString() ?: "-"), "quiet" to quietOn().toString())
+        if (source != null || wakeGain != null) activate(synchronized(engineLock) { spec })
+        return null
+    }
+
+    private fun debugOn(): Boolean = prefs.getLong(KEY_DEBUG_UNTIL, 0L) > System.currentTimeMillis()
+
+    /**
+     * The quiet test, only while debugging: a wake is written down (event `wake_test` and its sound) but not answered, so the
+     * assistant does not stop listening for a command and every try of the phrase is heard and kept. Ends with the debug mode.
+     */
+    private fun quietOn(): Boolean = debugOn() && prefs.getBoolean(KEY_QUIET, false)
+
+    private val debugDir by lazy { java.io.File(filesDir, "wake-debug").apply { mkdirs() } }
+
+    /**
+     * Keeps the sound of one utterance (debug mode only): `files/wake-debug/<time>-<wake|miss>.wav`, with the text, the loudest
+     * raw level, the source and the gain in `index.json`; only the last [DEBUG_KEEP]. Returns that level.
+     */
+    @Synchronized private fun saveUtterance(text: String, wake: Boolean): Double {
+        val mic = microphone ?: return dev.hram.androsaur.audio.level.AudioLevel.FLOOR_DBFS
+        val (pcm, peak) = mic.takeUtterance()
+        if (pcm.isEmpty()) return peak
+        val bytes = ByteArray(pcm.size * 2).also { b -> pcm.forEachIndexed { i, v -> b[2 * i] = v.toByte(); b[2 * i + 1] = (v.toInt() shr 8).toByte() } }
+        val name = "${System.currentTimeMillis()}-${if (wake) "wake" else "miss"}.wav"
+        java.io.File(debugDir, name).writeBytes(dev.hram.androsaur.audio.notes.Wav.header(bytes.size, mic.sampleRate) + bytes)
+        val index = java.io.File(debugDir, "index.json")
+        val list = runCatching { JSONArray(index.readText()) }.getOrDefault(JSONArray())
+        list.put(JSONObject().put("file", name).put("text", text).put("wake", wake).put("peakDbfs", Math.round(peak * 10) / 10.0)
+            .put("source", mic.source).put("wakeGain", mic.wakeGain).put("phrase", phrase))
+        val kept = JSONArray()
+        val from = maxOf(0, list.length() - DEBUG_KEEP)
+        for (i in 0 until list.length()) {
+            val o = list.getJSONObject(i)
+            if (i < from) java.io.File(debugDir, o.getString("file")).delete() else kept.put(o)
+        }
+        index.writeText(kept.toString())
+        return Math.round(peak * 10) / 10.0
+    }
+
+    /** Throws away everything the debug mode kept. */
+    fun clearDebug(): Int = (debugDir.listFiles() ?: emptyArray()).count { it.delete() }
+
+    /** What the debug mode kept: text, level, source, gain and file of each utterance. */
+    fun debugIndex(): JSONArray = runCatching { JSONArray(java.io.File(debugDir, "index.json").readText()) }.getOrDefault(JSONArray())
+
     /** Engines the user can choose, as setting strings. */
     fun availableEngines(): List<String> = factory.available()
 
@@ -162,8 +223,14 @@ class AudioService : Service() {
             val began = SystemClock.elapsedRealtime()
             val built = runCatching {
                 factory.create(wanted, usedPhrase) { text ->
-                    // Only utterances containing a start of a phrase word are kept: enough to tune the match without logging speech.
-                    if (keywords.any { it in text }) record("heard", "text" to text)
+                    if (debugOn()) {
+                        // The recognition debug mode (switched on for a while by the owner): every utterance and its sound.
+                        val saved = saveUtterance(text, wake = false)
+                        record("heard", "text" to text, "levelDbfs" to saved.toString(), "debug" to "true")
+                    } else if (keywords.any { it in text }) {
+                        // Normally only utterances containing a start of a phrase word are kept: enough to tune the match without logging speech.
+                        record("heard", "text" to text)
+                    }
                 }
             }
             val tookMs = SystemClock.elapsedRealtime() - began
@@ -183,6 +250,9 @@ class AudioService : Service() {
                     onSilence = { silent -> record(if (silent) "microphone_silent" else "microphone_recovered") },
                     onError = { code -> error = code; record("error", "code" to code) },
                     mutedUntil = { maxOf(speech.micMutedUntil, notes.micMutedUntil, ringer.micMutedUntil) },
+                    source = prefs.getString(KEY_MIC_SOURCE, null) ?: MicrophoneListener.Sources.DEFAULT,
+                    wakeGain = prefs.getBoolean(KEY_WAKE_GAIN, false),
+                    keepUtterances = ::debugOn,
                 ).also { it.start() }
                 if (ready != null) record("engine_ready", "engine" to wanted.id, "loadMs" to tookMs.toString())
             }
@@ -193,7 +263,13 @@ class AudioService : Service() {
         val data = mutableListOf("engine" to engineId)
         heard?.let { data += "heard" to it }
         levelDbfs?.let { data += "levelDbfs" to (Math.round(it * 10) / 10.0).toString() }
+        if (quietOn() && engineId != "simulated") {
+            record("wake_test", *data.toTypedArray())
+            saveUtterance(heard.orEmpty(), wake = true)
+            return
+        }
         record("wake_word", *data.toTypedArray())
+        if (debugOn()) saveUtterance(heard.orEmpty(), wake = true)
         // «Петя!» while the timer rings is the natural way to silence it.
         ringer.stop("wake_word")
         lastWakeText = listOfNotNull(engineId, heard).joinToString(" · ")
@@ -227,7 +303,10 @@ class AudioService : Service() {
             if (mic != null) {
                 engineJson.put("msPerFrame", Math.round(mic.engineMsPerFrame * 100) / 100.0).put("frameMs", Math.round(mic.frameMs * 10) / 10.0)
                 json.put("microphone", JSONObject().put("levelDbfs", Math.round(mic.levelDbfs * 10) / 10.0)
-                    .put("frames", mic.frames).put("silent", mic.silent))
+                    .put("frames", mic.frames).put("silent", mic.silent)
+                    .put("source", mic.source).put("wakeGain", mic.wakeGain)
+                    .put("debugUntilMs", prefs.getLong(KEY_DEBUG_UNTIL, 0L).takeIf { it > System.currentTimeMillis() } ?: JSONObject.NULL)
+                    .put("quiet", quietOn()))
             }
             json.put("engine", engineJson)
         }
@@ -244,6 +323,11 @@ class AudioService : Service() {
         private const val CHANNEL = "audio"
         private const val KEY_ENGINE = "engine"
         private const val KEY_PHRASE = "phrase"
+        private const val KEY_MIC_SOURCE = "mic_source"
+        private const val KEY_WAKE_GAIN = "wake_gain"
+        private const val KEY_DEBUG_UNTIL = "wake_debug_until"
+        private const val KEY_QUIET = "wake_quiet_test"
+        private const val DEBUG_KEEP = 60
         private const val TAG = "AndrosaurAudio"
         private const val PERSON_FRESH_MS = 15_000L
     }

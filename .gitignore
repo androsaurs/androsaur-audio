@@ -29,3 +29,4 @@ androidApp/src/main/assets/*.part
 androidApp/libs/
 androidApp/src/main/assets/tts/voices/
 androidApp/src/main/assets/tts/espeak-ng-data/
+__pycache__/

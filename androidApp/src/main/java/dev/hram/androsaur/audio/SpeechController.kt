@@ -117,7 +117,10 @@ class SpeechController(
             val sp = synchronized(lock) { if (state == "ready") speaker else null }
             sp != null && say(sp, clean, usedSpeed) != null
         }
-        return try { if (done.get()) null else "speech_failed" } catch (e: Exception) { "speech_failed" }
+        // Whoever waits (a command, a note) is never stuck for good on a speech that does not end.
+        return try { if (done.get(WAIT_LIMIT_S, java.util.concurrent.TimeUnit.SECONDS)) null else "speech_failed" }
+            catch (e: java.util.concurrent.TimeoutException) { current?.stop(); synchronized(lock) { speaker }?.stop(); "speech_timeout" }
+            catch (e: Exception) { "speech_failed" }
     }
 
     /** Speaks with a given engine and keeps the microphone deaf meanwhile. */
@@ -256,6 +259,8 @@ class SpeechController(
     }
 
     companion object {
+        /** The longest a caller waits for a phrase to be said. */
+        const val WAIT_LIMIT_S = 60L
         const val MIN_SPEED = 0.5f
         const val MAX_SPEED = 2f
         const val MAX_CHARS = 600

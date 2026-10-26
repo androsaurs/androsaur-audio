@@ -20,6 +20,11 @@ data class Note(
     val toId: String? = null,
     /** The permanent id of who left it, or null when unknown; [from] is the name they had then. */
     val fromId: String? = null,
+    /**
+     * What was said, when the hub transcribed it (Groq) and found it reliable; then the note is delivered by speech synthesis.
+     * Null without a hub, without the integration, or when the transcription was doubtful: then the recording itself is played.
+     */
+    val text: String? = null,
 )
 
 object Recipient {

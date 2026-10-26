@@ -3,7 +3,6 @@ package dev.hram.androsaur.audio.command
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
-import kotlin.test.assertTrue
 
 class CommandsTest {
     private val wife = Recipient("жена", person = "Маша")
@@ -67,9 +66,19 @@ class CommandsTest {
         assertEquals("мама", parser.parse("передан маме")?.recipient?.id)
     }
 
-    @Test fun roleBeforeNameWhenTheyCollide() {
-        // «жене» is one edit from «жена» and from «Женя»: the one listed first wins.
-        assertEquals("жена", parser.parse("передай жене")?.recipient?.id)
-        assertTrue(CommandParser(listOf(Recipient("Женя"), wife)).parse("передай жене")?.recipient?.id == "Женя")
+    @Test fun aBoundRecipientWinsATieWhateverTheOrder() {
+        // «жене» is «жена» and «Женя» alike: the one bound to somebody wins.
+        assertEquals("жена", parser.parse("передай жене")?.recipient?.id, "the role given to Маша, over the unbound name")
+        assertEquals("жена", CommandParser(listOf(Recipient("Женя"), wife)).parse("передай жене")?.recipient?.id)
     }
+
+    @Test fun anUnboundRoleNoLongerTakesAPersonsName() {
+        // The bug: the role «жена» was in the list with nobody behind it and took the notes meant for Женя.
+        val book = listOf(Recipient("жена"), Recipient("мама"), Recipient("Женя", personId = "p1"))
+        assertEquals("Женя", CommandParser(book).parse("передай жене")?.recipient?.id)
+        assertEquals("мама", CommandParser(book).parse("передай маме")?.recipient?.id, "alone, an unbound role still works")
+    }
+
+    @Test fun twoUnboundKeepTheListOrder() =
+        assertEquals("жена", CommandParser(listOf(Recipient("жена"), Recipient("Женя"))).parse("передай жене")?.recipient?.id)
 }

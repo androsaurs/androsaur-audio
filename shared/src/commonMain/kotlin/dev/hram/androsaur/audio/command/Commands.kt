@@ -73,13 +73,18 @@ class CommandParser(private val recipients: List<Recipient>) {
             if (word in FILLERS) return@forEachIndexed
             recipients.forEach { r ->
                 val score = (listOf(r.id) + r.forms).minOf { form -> distance(word, form.lowercase().replace('ё', 'е')) }
-                if (score < bestScore) { bestScore = score; best = Triple(r, word, from + i) }
+                // On a tie a recipient bound to somebody (a person the camera knows, or a role given to a person) wins over an
+                // unbound one: «Жене» is «Женя» (a person) and the role «жена» (nobody) alike, and a note for nobody is never delivered.
+                val better = score < bestScore || (score == bestScore && best != null && bound(r) && !bound(best!!.first))
+                if (better) { bestScore = score; best = Triple(r, word, from + i) }
             }
         }
         val hit = best?.takeIf { bestScore <= 1 }
         return if (hit == null) Command(null, null, false)
         else Command(hit.first, hit.second, hit.third > 0 && words[hit.third - 1] == "для")
     }
+
+    private fun bound(r: Recipient) = r.personId != null || !r.person.isNullOrBlank()
 
     /** 0 for the same word, 1 for a near one with the same first letter, a large number otherwise. */
     private fun distance(heard: String, form: String): Int {

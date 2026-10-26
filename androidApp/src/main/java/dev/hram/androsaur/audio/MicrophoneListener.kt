@@ -18,7 +18,47 @@ class MicrophoneListener(
     private val onError: (code: String) -> Unit,
     /** Elapsed-realtime time until which the engine must not hear the microphone (the assistant is speaking and would wake itself). */
     private val mutedUntil: () -> Long = { 0L },
+    /** Android's audio source: [Sources]. Phones differ a lot in how loud and how processed each one is. */
+    val source: String = Sources.DEFAULT,
+    /** Amplify quiet speech before the wake engine hears it (the commands after the wake word are amplified anyway). */
+    val wakeGain: Boolean = false,
+    /** Keep the sound of each utterance for [takeUtterance] (the recognition debug mode). */
+    private val keepUtterances: () -> Boolean = { false },
 ) {
+    /** The audio sources one can choose. */
+    object Sources {
+        const val DEFAULT = "voice_recognition"
+        val ALL = mapOf(
+            "voice_recognition" to MediaRecorder.AudioSource.VOICE_RECOGNITION,
+            "mic" to MediaRecorder.AudioSource.MIC,
+            "voice_communication" to MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+            "unprocessed" to MediaRecorder.AudioSource.UNPROCESSED,
+        )
+    }
+
+    private val gain = dev.hram.androsaur.audio.notes.AutoGain()
+    private val utterance = ArrayDeque<ShortArray>()
+    private var utterancePeak = AudioLevel.FLOOR_DBFS
+
+    /**
+     * The sound the wake engine heard since the last call (at most 15 s) and the loudest raw level in it; for the debug mode,
+     * called when an utterance ends.
+     */
+    @Synchronized fun takeUtterance(): Pair<ShortArray, Double> {
+        val all = ShortArray(utterance.sumOf { it.size })
+        var at = 0
+        for (f in utterance) { f.copyInto(all, at); at += f.size }
+        val peak = utterancePeak
+        utterance.clear(); utterancePeak = AudioLevel.FLOOR_DBFS
+        return all to peak
+    }
+
+    @Synchronized private fun keep(frame: ShortArray, rawDbfs: Double) {
+        utterance.addLast(frame)
+        utterancePeak = maxOf(utterancePeak, rawDbfs)
+        while (utterance.size > 15 * engine.sampleRate / engine.frameLength) utterance.removeFirst()
+    }
+
     @Volatile var levelDbfs = AudioLevel.FLOOR_DBFS; private set
     @Volatile var frames = 0L; private set
     @Volatile var silent = false; private set
@@ -40,7 +80,7 @@ class MicrophoneListener(
         val minBuffer = AudioRecord.getMinBufferSize(engine.sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
         if (minBuffer <= 0) { onError("microphone_unsupported"); return }
         val record = try {
-            AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, engine.sampleRate, AudioFormat.CHANNEL_IN_MONO,
+            AudioRecord(Sources.ALL[source] ?: MediaRecorder.AudioSource.VOICE_RECOGNITION, engine.sampleRate, AudioFormat.CHANNEL_IN_MONO,
                 AudioFormat.ENCODING_PCM_16BIT, maxOf(minBuffer, engine.frameLength * 2 * 4))
         } catch (_: SecurityException) { onError("microphone_permission_denied"); return }
         if (record.state != AudioRecord.STATE_INITIALIZED) { record.release(); onError("microphone_unavailable"); return }
@@ -71,7 +111,9 @@ class MicrophoneListener(
                 val began = System.nanoTime()
                 // While muted the engine gets silence instead, so what it heard before the speech ends cleanly and does not trigger afterwards.
                 val muted = commanding || SystemClock.elapsedRealtime() < mutedUntil()
-                val detected = engine.process(if (muted) silence else frame) && !muted
+                val heard = if (muted) silence else if (wakeGain) gain.apply(frame) else frame
+                if (keepUtterances()) keep(heard.copyOf(), levelDbfs)
+                val detected = engine.process(heard) && !muted
                 engineMsPerFrame += ((System.nanoTime() - began) / 1e6 - engineMsPerFrame) * 0.05
                 if (detected && gate.accept(SystemClock.elapsedRealtime())) onWake(engine.lastHeard, levelDbfs)
             }

@@ -14,6 +14,8 @@ sealed interface QuickCommand {
     data object Stop : QuickCommand
     /** Play again the latest note for the person in front of the camera. */
     data object RepeatNote : QuickCommand
+    /** «Сколько будет семь умножить на восемь»: [expression] as `7 * 8` (see [Arithmetic]). */
+    data class Calc(val expression: String) : QuickCommand
 }
 
 object QuickCommands {
@@ -24,6 +26,8 @@ object QuickCommands {
         val has = { w: String -> w in words }
         val starts = { p: String -> words.any { it.startsWith(p) } }
         if (words.any { it in STOP }) return QuickCommand.Stop
+        // Arithmetic before the time: «сколько будет…» has numbers, «сколько времени» has none. Not inside a note («скажи маме…»), unless asked «скажи, сколько будет…».
+        if (has("сколько") || words.none { it in NOTE_VERBS }) Arithmetic.parse(words)?.let { return QuickCommand.Calc(it) }
         if (starts("таймер")) {
             if (has("осталось") || has("сколько")) return QuickCommand.TimerLeft
             return duration(words)?.let { QuickCommand.Timer(it) }
@@ -68,7 +72,7 @@ object QuickCommands {
             "погода", "погоду", "погоды", "погодой", "прогноз", "какая", "завтра", "сегодня", "что", "с", "есть", "мне", "меня", "у",
             "повтори", "повтори-ка", "еще", "раз", "записку", "записка", "сообщение", "последнюю", "последнее", "проиграй",
             "для", "не", "надо",
-        )).distinct()
+        ) + Arithmetic.vocabulary).distinct()
 
     private const val MAX_SECONDS = 3 * 3600
     private val STOP = setOf("стоп", "хватит", "отмена", "отмени", "замолчи", "тихо", "выключи", "останови", "остановить", "отключи", "сбрось")

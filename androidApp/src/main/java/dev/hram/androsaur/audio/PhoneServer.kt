@@ -102,6 +102,13 @@ class PhoneServer(private val audio: AudioService, private val token: String) {
                 }
                 "GET /speech" -> json(socket, 200, (if (query["full"] == "1") audio.speech.status() else audio.speech.live()).put("mode", audio.mode()))
                 "POST /speak" -> reply(socket, audio.speech.speak(body.optString("text"), if (body.has("speed")) body.optDouble("speed").toFloat() else null))
+                // The microphone: source, amplification before the wake engine, recognition debug mode (minutes, 0 — off),
+                // quiet test (while debugging: wakes are only written down, the assistant does not answer).
+                "POST /microphone" -> reply(socket, audio.setMicrophone(body.optString("source").ifEmpty { null },
+                    if (body.has("wakeGain")) body.getBoolean("wakeGain") else null, if (body.has("debugMinutes")) body.getInt("debugMinutes") else null,
+                    if (body.has("quiet")) body.getBoolean("quiet") else null))
+                "GET /debug/utterances" -> json(socket, 200, JSONObject().put("utterances", audio.debugIndex()))
+                "POST /debug/clear" -> json(socket, 200, JSONObject().put("deleted", audio.clearDebug()))
                 "POST /ring" -> reply(socket, audio.ringer.ring(body.optInt("seconds", 60)))
                 "POST /ring/stop" -> json(socket, 200, JSONObject().put("ok", true).put("wasRinging", audio.ringer.stop("stop")))
                 "POST /speak/stop" -> { audio.speech.stop(); json(socket, 200, JSONObject().put("ok", true)) }
@@ -120,9 +127,15 @@ class PhoneServer(private val audio: AudioService, private val token: String) {
                     if (from.isBlank() || into.isBlank()) json(socket, 400, JSONObject().put("error", "from_and_into_required"))
                     else json(socket, 200, JSONObject().put("ok", true).put("notes", audio.notes.readdress(from, into)).put("recipients", audio.recipients.merge(from, into)))
                 }
+                // The sound of a note (WAV) — the main app hands it to the hub for transcription; and the text that comes back.
+                "GET /notes/audio" -> {
+                    val bytes = audio.notes.audio(query["id"].orEmpty())
+                    if (bytes == null) json(socket, 404, JSONObject().put("error", "not_found")) else respond(socket, 200, bytes, type = "audio/wav")
+                }
+                "POST /notes/text" -> json(socket, 200, JSONObject().put("ok", audio.notes.setText(body.optString("id"), if (body.isNull("text")) null else body.optString("text"))))
                 "POST /notes/address" -> json(socket, 200, JSONObject().put("ok", audio.notes.address(body.optString("id"), body.optString("toId"), body.optString("fromId"))))
                 "POST /notes/record/stop" -> json(socket, 200, JSONObject().put("ok", audio.notes.stopRecording()))
-                "POST /notes/play" -> reply(socket, audio.notes.play(body.optString("id").ifEmpty { null }, body.optString("to").ifEmpty { null }, body.optBoolean("announce", true)))
+                "POST /notes/play" -> reply(socket, audio.notes.play(body.optString("id").ifEmpty { null }, body.optString("to").ifEmpty { null }, body.optBoolean("announce", true), body.optBoolean("original")))
                 "POST /notes/play/stop" -> { audio.notes.stopPlaying(); json(socket, 200, JSONObject().put("ok", true)) }
                 "POST /notes/delete" -> json(socket, 200, JSONObject().put("ok", audio.notes.delete(body.optString("id"))))
                 "GET /recipients" -> json(socket, 200, JSONObject().put("recipients", audio.recipients.toJson()))
