@@ -8,6 +8,32 @@ import kotlin.test.assertTrue
 class QuickCommandsTest {
     private fun p(text: String) = QuickCommands.parse(text)
 
+    @Test fun otherAccessoriesHaveExplicitTargetsAndOnlyOneCanBeRequested() {
+        for ((text, target) in listOf(
+            "надень бантик" to "bow", "одень бант" to "bow", "надень шарфик" to "scarf",
+            "надень шарф" to "scarf", "надень цветочный венок" to "crown",
+            "возьми семечку" to "seed", "дай семечко" to "seed",
+        )) assertEquals(QuickCommand.Accessory(target, true), p(text), text)
+        for ((text, target) in listOf(
+            "сними бантик" to "bow", "убери бант" to "bow", "сними шарф" to "scarf",
+            "сними венок" to "crown", "убери семечку" to "seed", "отложи семечку" to "seed",
+            "сними все аксессуары" to "none", "убери украшения" to "none", "сними всё" to "none",
+        )) assertEquals(QuickCommand.Accessory(target, false), p(text), text)
+        for (text in listOf("не надевай бант", "не бери семечку", "передай маме надень венок",
+            "надень очки и бантик", "надень все аксессуары", "сними венок и надень шарфик")) assertNull(p(text), text)
+        assertTrue(QuickCommands.vocabulary.containsAll(listOf("бантик", "бант", "шарф", "шарфик", "венок", "возьми", "семечку", "все")))
+    }
+
+    @Test fun glassesAreExplicitCommandsAndNotContentOfANote() {
+        for (text in listOf("надень очки", "одень очки пожалуйста", "надевай очки"))
+            assertEquals(QuickCommand.Glasses(true), p(text), text)
+        for (text in listOf("сними очки", "убери очки пожалуйста", "снимай очки"))
+            assertEquals(QuickCommand.Glasses(false), p(text), text)
+        for (text in listOf("не надевай очки", "не снимай очки", "передай маме надень очки", "скажи Кате сними очки", "очки", "надень ботинки", "надень и сними очки"))
+            assertNull(p(text), text)
+        assertTrue(QuickCommands.vocabulary.containsAll(listOf("очки", "надень", "одень", "сними", "снимай", "убери")))
+    }
+
     @Test fun theTime() {
         assertEquals(QuickCommand.Time, p("который час"))
         assertEquals(QuickCommand.Time, p("сколько сейчас времени"))

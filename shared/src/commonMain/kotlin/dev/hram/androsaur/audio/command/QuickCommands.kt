@@ -16,6 +16,8 @@ sealed interface QuickCommand {
     data object RepeatNote : QuickCommand
     /** «Сколько будет семь умножить на восемь»: [expression] as `7 * 8` (see [Arithmetic]). */
     data class Calc(val expression: String) : QuickCommand
+    data class Glasses(val wear: Boolean) : QuickCommand
+    data class Accessory(val accessory: String, val wear: Boolean) : QuickCommand
 }
 
 object QuickCommands {
@@ -26,6 +28,18 @@ object QuickCommands {
         val has = { w: String -> w in words }
         val starts = { p: String -> words.any { it.startsWith(p) } }
         if (words.any { it in STOP }) return QuickCommand.Stop
+        if (!has("не") && words.none { it in NOTE_VERBS }) {
+            val targets = ACCESSORY_WORDS.filterValues { names -> words.any { it in names } }.keys
+            val all = words.any { it in listOf("все", "аксессуар", "аксессуары", "украшение", "украшения") }
+            val target = targets.singleOrNull() ?: if (targets.isEmpty() && all) "none" else null
+            if (target != null) {
+                val wear = words.any { it in listOf("надень", "одень", "надевай", "одевай", "надень-ка", "повяжи") } ||
+                    (target == "seed" && words.any { it in listOf("возьми", "дай") })
+                val remove = words.any { it in listOf("сними", "снимай", "убери", "сними-ка", "отложи") }
+                if (wear != remove && (target != "none" || remove))
+                    return if (target == "glasses") QuickCommand.Glasses(wear) else QuickCommand.Accessory(target, wear)
+            }
+        }
         // Arithmetic before the time: «сколько будет…» has numbers, «сколько времени» has none. Not inside a note («скажи маме…»), unless asked «скажи, сколько будет…».
         if (has("сколько") || words.none { it in NOTE_VERBS }) Arithmetic.parse(words)?.let { return QuickCommand.Calc(it) }
         if (starts("таймер")) {
@@ -72,9 +86,17 @@ object QuickCommands {
             "погода", "погоду", "погоды", "погодой", "прогноз", "какая", "завтра", "сегодня", "что", "с", "есть", "мне", "меня", "у",
             "повтори", "повтори-ка", "еще", "раз", "записку", "записка", "сообщение", "последнюю", "последнее", "проиграй",
             "для", "не", "надо",
+            "очки", "надень", "одень", "надевай", "одевай", "сними", "снимай", "убери", "пожалуйста", "ка",
+            "бантик", "бант", "шарф", "шарфик", "венок", "цветочный", "семечка", "семечку", "семечко", "семечки",
+            "возьми", "дай", "отложи", "все", "аксессуар", "аксессуары", "украшение", "украшения",
         ) + Arithmetic.vocabulary).distinct()
 
     private const val MAX_SECONDS = 3 * 3600
+    private val ACCESSORY_WORDS = mapOf(
+        "glasses" to setOf("очки"), "bow" to setOf("бантик", "бант"),
+        "scarf" to setOf("шарф", "шарфик"), "crown" to setOf("венок"),
+        "seed" to setOf("семечка", "семечку", "семечко", "семечки"),
+    )
     private val STOP = setOf("стоп", "хватит", "отмена", "отмени", "замолчи", "тихо", "выключи", "останови", "остановить", "отключи", "сбрось")
     private val NOTE_VERBS = setOf("передай", "передайте", "скажи", "скажите", "запиши", "запишите", "оставь", "оставьте", "отправь", "отправьте", "напиши", "напишите")
     private val NUMBERS: Map<String, Double> = mapOf(
