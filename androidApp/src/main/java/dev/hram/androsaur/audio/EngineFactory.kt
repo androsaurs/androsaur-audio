@@ -13,6 +13,7 @@ class EngineFactory(private val context: Context) {
         EngineSpec.None -> NoWakeWordEngine()
         EngineSpec.Vosk -> VoskEngine(vosk.model(), grammar = false, phrase = phrase, onUtterance = onUtterance)
         EngineSpec.VoskGrammar -> VoskEngine(vosk.model(), grammar = true, phrase = phrase, onUtterance = onUtterance)
+        EngineSpec.KwsZyuzya -> ZyuzyaKwsEngine(context, phrase)
         is EngineSpec.MicroWakeWord -> {
             val config = MicroWakeWordConfig.load(context, spec.model)
             MicroWakeWordEngine(config, MicroWakeWordConfig.modelBuffer(context, config))
@@ -25,7 +26,13 @@ class EngineFactory(private val context: Context) {
 
     /** Engines offered to the user, as setting strings. */
     fun available(): List<String> =
-        listOf(EngineSpec.None.id, EngineSpec.Vosk.id, EngineSpec.VoskGrammar.id) + MicroWakeWordConfig.names(context).map { EngineSpec.MicroWakeWord(it).id }
+        listOf(EngineSpec.None.id, EngineSpec.Vosk.id, EngineSpec.VoskGrammar.id) +
+            (if (kwsAvailable) listOf(EngineSpec.KwsZyuzya.id) else emptyList()) +
+            MicroWakeWordConfig.names(context).map { EngineSpec.MicroWakeWord(it).id }
+
+    private val kwsAvailable by lazy {
+        runCatching { context.assets.open("kws/ru/tokens.txt").use { } }.isSuccess
+    }
 
     fun close() = vosk.close()
 }

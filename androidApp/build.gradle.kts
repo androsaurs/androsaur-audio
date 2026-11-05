@@ -6,8 +6,8 @@ android {
         applicationId = "dev.hram.androsaur.audio"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1-skeleton"
+        versionCode = 2
+        versionName = "0.2-zyuzya-kws"
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }
     buildFeatures { compose = true; buildConfig = true }

@@ -203,6 +203,8 @@ class AudioService : Service() {
         val wanted = engineId?.let { EngineSpec.parse(it) ?: return "unknown_engine" } ?: synchronized(engineLock) { spec }
         if (engineId != null && engineId !in availableEngines()) return "engine_not_available"
         val newPhrase = phraseText?.let { WakePhrase.normalize(it) ?: return "invalid_phrase" }
+        if (wanted == EngineSpec.KwsZyuzya && !dev.hram.androsaur.audio.wake.ZyuzyaProfile.supports(newPhrase ?: phrase))
+            return "phrase_not_supported_by_zyuzya_profile"
         prefs.edit().putString(KEY_ENGINE, wanted.id).apply { if (newPhrase != null) putString(KEY_PHRASE, newPhrase) }.apply()
         if (newPhrase != null) getSystemService(NotificationManager::class.java).notify(1, notification())
         activate(wanted)

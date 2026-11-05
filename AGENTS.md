@@ -21,5 +21,9 @@
 - Протокол событий пока локальный (HTTP и MCP). Общую библиотеку `androsaur-protocol`
   не создавать и не подключать без решения владельца.
 - Для сборки нужны NDK 29.0.14206865 и CMake 3.22.1 в SDK; CMake скачивает исходники tflite-micro из сети.
+- Для экспериментального `kws:zyuzya` скачать русские ONNX assets через
+  `bash scripts/fetch-kws-model.sh`. Профиль принимает только «зюзя»/«сюзя»;
+  ограничения и измерения — `docs/wake-word-tuning.md`. Семейные WAV и веса
+  держать локально, вне Git. Этот профиль не доказывает качество на детях.
 - Проверки: `./gradlew :androidApp:assembleDebug :shared:jvmTest :androidApp:lintDebug`
   (нужен `local.properties` с `sdk.dir`, он в .gitignore).

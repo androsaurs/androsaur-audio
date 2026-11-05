@@ -7,6 +7,8 @@ sealed class EngineSpec(val id: String) {
     data object Vosk : EngineSpec("vosk")
     /** Recognition limited to the wake phrase by a grammar: cheaper, but any speech starting like it matches. */
     data object VoskGrammar : EngineSpec("vosk-grammar")
+    /** Experimental Russian subword keyword spotter, calibrated for «Зюзя». */
+    data object KwsZyuzya : EngineSpec("kws:zyuzya")
     /** A microWakeWord model, named by its asset (`okay_nabu` for `okay_nabu.tflite` + `okay_nabu.json`). */
     class MicroWakeWord(val model: String) : EngineSpec("mww:$model")
 
@@ -21,6 +23,7 @@ sealed class EngineSpec(val id: String) {
             id == "none" -> None
             id == "vosk" -> Vosk
             id == "vosk-grammar" -> VoskGrammar
+            id == "kws:zyuzya" -> KwsZyuzya
             id.startsWith("mww:") -> id.removePrefix("mww:").takeIf { modelName.matches(it) }?.let { MicroWakeWord(it) }
             else -> null
         }

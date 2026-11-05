@@ -6,7 +6,7 @@ package dev.hram.androsaur.audio.wake
  * the speech model is Russian. The same string drives the matcher and the vosk-grammar word list.
  */
 object WakePhrase {
-    const val DEFAULT = "привет~3 петя~1"
+    const val DEFAULT = "зюзя"
     private const val MAX_LENGTH = 80
     private const val MAX_WORDS = 4
     private const val MAX_GRAMMAR_PHRASES = 16

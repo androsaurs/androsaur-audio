@@ -38,11 +38,14 @@ class CommandListener(
 ) {
     @Volatile var listening = false; private set
     @Volatile var enabled = true
+    @Volatile private var repeatedWakeUntil = 0L
 
-    /** Opens the listening window after a wake word. Does nothing while one is open or a note is being made. */
+    /** Opens the listening window, or extends it after another acoustic wake. Disabled while a note is being made. */
     fun open() {
-        if (!enabled || listening) return
+        if (!enabled) return
+        if (listening) { repeatedWakeUntil = SystemClock.elapsedRealtime() + WINDOW_MS; return }
         val mic = microphone() ?: return
+        repeatedWakeUntil = 0L
         listening = true
         Thread({ listen(mic) }, "command").start()
     }
@@ -80,7 +83,7 @@ class CommandListener(
         record("command_listening", emptyArray())
         mic.commandTap = { frame -> frames.offer(frame) }
         try {
-            while (SystemClock.elapsedRealtime() < deadline) {
+            while (SystemClock.elapsedRealtime() < maxOf(deadline, repeatedWakeUntil)) {
                 val raw = frames.poll(100, TimeUnit.MILLISECONDS) ?: continue
                 peak = maxOf(peak, dev.hram.androsaur.audio.level.AudioLevel.dbfs(raw))
                 val frame = gain.apply(raw)

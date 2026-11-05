@@ -110,7 +110,7 @@ class MicrophoneListener(
                 if (detector.silent != wasSilent) { silent = detector.silent; onSilence(silent) }
                 val began = System.nanoTime()
                 // While muted the engine gets silence instead, so what it heard before the speech ends cleanly and does not trigger afterwards.
-                val muted = commanding || SystemClock.elapsedRealtime() < mutedUntil()
+                val muted = (commanding && !engine.listenDuringCommands) || SystemClock.elapsedRealtime() < mutedUntil()
                 val heard = if (muted) silence else if (wakeGain) gain.apply(frame) else frame
                 if (keepUtterances()) keep(heard.copyOf(), levelDbfs)
                 val detected = engine.process(heard) && !muted

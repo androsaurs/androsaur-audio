@@ -13,6 +13,8 @@ interface WakeWordEngine {
     fun process(frame: ShortArray): Boolean
     /** What the engine heard at the last detection, when it can tell (speech recognizers can, classifiers cannot). */
     val lastHeard: String? get() = null
+    /** Independent keyword detectors can hear another wake while Vosk listens for a command. */
+    val listenDuringCommands: Boolean get() = false
     fun close()
 }
 

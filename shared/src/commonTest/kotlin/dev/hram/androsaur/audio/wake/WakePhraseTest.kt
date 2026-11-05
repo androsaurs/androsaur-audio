@@ -24,5 +24,16 @@ class WakePhraseTest {
 
     @Test fun grammarIsCapped() = assertTrue(WakePhrase.grammarPhrases("аа|бб|вв|гг аа|бб|вв|гг аа|бб|вв|гг").size <= 16)
 
-    @Test fun displayUsesFirstAlternatives() = assertEquals("привет петя", WakePhrase.display(WakePhrase.DEFAULT))
+    @Test fun defaultIsZyuzya() = assertEquals("зюзя", WakePhrase.DEFAULT)
+
+    @Test fun displayUsesFirstAlternatives() = assertEquals("привет петя", WakePhrase.display("привет|здравствуй петя~1"))
+
+    @Test fun defaultMatchesOnlyWholeExactWord() {
+        val matcher = PhraseMatcher(WakePhrase.DEFAULT)
+        assertTrue(matcher.matches("Зюзя!"))
+        assertTrue(matcher.matches("ну зюзя привет"))
+        listOf("зюзи", "зюзик", "суперзюзя", "привет петя", "железяка").forEach {
+            kotlin.test.assertFalse(matcher.matches(it), it)
+        }
+    }
 }
