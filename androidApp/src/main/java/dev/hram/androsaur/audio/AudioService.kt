@@ -35,6 +35,8 @@ class AudioService : Service() {
     val speech by lazy { SpeechController(this, prefs) { type, data -> record(type, *data) } }
     val notes by lazy { NoteController(this, { microphone }, speech, { recipients.all() }) { type, data -> record(type, *data) } }
     val recipients by lazy { RecipientBook(prefs) }
+    val rooms by lazy { RoomBook(prefs) }
+    val announcements by lazy { AnnouncementBox() }
     /** Who the camera sees now, pushed by the main app; a note left by voice is filed as «from» this person while the push is fresh. */
     @Volatile private var personName: String? = null
     @Volatile private var personId: String? = null
@@ -50,7 +52,7 @@ class AudioService : Service() {
     private fun person(): String? = personName?.takeIf { SystemClock.elapsedRealtime() - personAt < PERSON_FRESH_MS }
     private fun currentPersonId(): String? = personId?.takeIf { SystemClock.elapsedRealtime() - personAt < PERSON_FRESH_MS }
     val ringer by lazy { Ringer { type, data -> record(type, *data) } }
-    val commands by lazy { CommandListener({ words -> factory.commandRecognizer(words) }, { microphone }, recipients, speech, notes, ringer, ::person, ::currentPersonId,
+    val commands by lazy { CommandListener({ words -> factory.commandRecognizer(words) }, { microphone }, recipients, rooms, announcements, speech, notes, ringer, ::person, ::currentPersonId,
         { type, data -> record(type, *data) }, { phrase }, { heard -> onWake(synchronized(engineLock) { spec.id }, heard) }) }
     private val nsd by lazy { NsdAdvertiser(this) }
     @Volatile private var lastWakeAt = 0L
@@ -314,7 +316,7 @@ class AudioService : Service() {
         }
         json.put("speech", JSONObject().put("speaker", speech.status().optString("speaker")).put("state", speech.status().optString("state")).put("speaking", speech.mouth.speaking))
         json.put("notes", notes.status())
-        json.put("commands", JSONObject().put("listening", commands.listening).put("recipients", recipients.all().size))
+        json.put("commands", JSONObject().put("listening", commands.listening).put("recipients", recipients.all().size).put("rooms", rooms.all().size))
         json.put("ringing", ringer.ringing)
         if (lastWakeAt != 0L) json.put("sinceLastWakeMs", SystemClock.elapsedRealtime() - lastWakeAt)
         error?.let { json.put("error", it) }

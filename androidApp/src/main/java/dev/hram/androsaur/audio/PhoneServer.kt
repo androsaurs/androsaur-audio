@@ -154,6 +154,18 @@ class PhoneServer(private val audio: AudioService, private val token: String) {
                         json(socket, 200, JSONObject().put("added", if (names == null) 0 else audio.recipients.addNames(List(names.length()) { names.getString(it) })))
                     }
                 }
+                "GET /rooms" -> json(socket, 200, JSONObject().put("rooms", audio.rooms.toJson()))
+                "POST /rooms" -> {
+                    val list = body.optJSONArray("rooms") ?: JSONArray()
+                    reply(socket, audio.rooms.replace(List(list.length()) { i -> list.getJSONObject(i).let { o ->
+                        dev.hram.androsaur.audio.command.Room(o.getString("id"), o.getString("name"), o.getJSONArray("words").let { w -> List(w.length()) { w.getString(it) } }) } }))
+                }
+                // A message recorded for a speaker («передай в детскую»): the main app takes the sound to the hub and then deletes it here.
+                "GET /announce/audio" -> {
+                    val bytes = audio.announcements.get(query["id"].orEmpty())
+                    if (bytes == null) json(socket, 404, JSONObject().put("error", "not_found")) else respond(socket, 200, bytes, type = "audio/wav")
+                }
+                "POST /announce/delete" -> json(socket, 200, JSONObject().put("ok", audio.announcements.remove(body.optString("id"))))
                 "POST /context" -> { audio.setPerson(body.optString("person"), body.optString("personId")); json(socket, 200, JSONObject().put("ok", true)) }
                 "POST /command" -> json(socket, 200, audio.commands.run(body.optString("text")))
                 "POST /mcp" -> {

@@ -95,22 +95,22 @@ class CommandParser(private val recipients: List<Recipient>) {
 
     private fun close(heard: String, verb: String) = heard == verb || (heard.isNotEmpty() && heard[0] == verb[0] && edits(heard, verb) <= 1)
 
-    private fun edits(a: String, b: String): Int {
-        var previous = IntArray(b.length + 1) { it }
-        for (i in 1..a.length) {
-            val current = IntArray(b.length + 1)
-            current[0] = i
-            for (j in 1..b.length) current[j] = minOf(previous[j] + 1, current[j - 1] + 1, previous[j - 1] + if (a[i - 1] == b[j - 1]) 0 else 1)
-            previous = current
-        }
-        return previous[b.length]
-    }
-
     companion object {
+        internal fun edits(a: String, b: String): Int {
+            var previous = IntArray(b.length + 1) { it }
+            for (i in 1..a.length) {
+                val current = IntArray(b.length + 1)
+                current[0] = i
+                for (j in 1..b.length) current[j] = minOf(previous[j] + 1, current[j - 1] + 1, previous[j - 1] + if (a[i - 1] == b[j - 1]) 0 else 1)
+                previous = current
+            }
+            return previous[b.length]
+        }
+
         /** The words a recognizer limited to this command has to know, besides the recipients. */
         val vocabulary: List<String> get() = VERBS + FILLERS
 
-        private val VERBS = listOf("передай", "передайте", "скажи", "скажите", "запиши", "запишите", "оставь", "оставьте", "отправь", "отправьте", "напиши", "напишите", "записку", "записка", "сообщение")
+        internal val VERBS = listOf("передай", "передайте", "скажи", "скажите", "запиши", "запишите", "оставь", "оставьте", "отправь", "отправьте", "напиши", "напишите", "записку", "записка", "сообщение")
         /** Words between the verb and the recipient that are never a recipient. */
         private val FILLERS = setOf("для", "что", "записку", "записка", "сообщение", "мне", "пожалуйста", "а", "ему", "ей")
         private const val MAX_WORDS_AFTER_VERB = 5

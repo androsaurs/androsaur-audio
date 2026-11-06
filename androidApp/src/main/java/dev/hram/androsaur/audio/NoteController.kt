@@ -46,7 +46,7 @@ class NoteController(
      * [beep] says when to talk with a sound; a caller that tells it in words passes false. [onDone] is called when the recording
      * ends, with null when a note was saved or the reason it was not (`no_speech`, `too_short`, `microphone_lost`, ...).
      */
-    fun startRecording(toText: String, fromText: String?, maxSeconds: Int?, beep: Boolean = true, toId: String? = null, fromId: String? = null, onDone: ((String?) -> Unit)? = null): String? {
+    fun startRecording(toText: String, fromText: String?, maxSeconds: Int?, beep: Boolean = true, toId: String? = null, fromId: String? = null, sink: ((ByteArray, Long) -> Unit)? = null, onDone: ((String?) -> Unit)? = null): String? {
         val to = Recipient.normalize(toText) ?: return "empty_recipient"
         if (to.length > MAX_NAME) return "recipient_too_long"
         val from = fromText?.trim().orEmpty().take(MAX_NAME)
@@ -60,14 +60,14 @@ class NoteController(
             phase = "recording"; stopRequested = false
         }
         micMutedUntil = Long.MAX_VALUE
-        Thread({ recordNote(mic, to, from, limitMs, beep, forId, fromId?.takeIf { it.isNotBlank() }, onDone) }, "notes-record").start()
+        Thread({ recordNote(mic, to, from, limitMs, beep, forId, fromId?.takeIf { it.isNotBlank() }, sink, onDone) }, "notes-record").start()
         return null
     }
 
     /** Ends the recording now; what was said so far is kept. */
     fun stopRecording(): Boolean { if (phase != "recording") return false; stopRequested = true; return true }
 
-    private fun recordNote(mic: MicrophoneListener, to: String, from: String, limitMs: Long, beep: Boolean, toId: String?, fromId: String?, onDone: ((String?) -> Unit)?) {
+    private fun recordNote(mic: MicrophoneListener, to: String, from: String, limitMs: Long, beep: Boolean, toId: String?, fromId: String?, sink: ((ByteArray, Long) -> Unit)?, onDone: ((String?) -> Unit)?) {
         record("note_recording_started", arrayOf("to" to to))
         var reason: String? = null
         var peakText = ""
@@ -109,9 +109,16 @@ class NoteController(
                 val loud = Loudness.process(samples, mic.sampleRate, gate.speechStartMs, gate.speechEndMs)
                 val bytes = ByteArray(loud.size * 2).also { b -> loud.forEachIndexed { i, v -> b[2 * i] = v.toByte(); b[2 * i + 1] = (v.toInt() shr 8).toByte() } }
                 val wav = Wav.header(bytes.size, mic.sampleRate) + bytes
-                val note = store.add(to, from, wav, Wav.durationMs(bytes.size, mic.sampleRate), toId, fromId)
-                record("note_recorded", arrayOf("id" to note.id, "to" to to, "durationMs" to note.durationMs.toString(),
-                    "end" to (if (v == RecordingGate.Verdict.LIMIT) "limit" else if (v == null) "stopped" else "pause")))
+                val durationMs = Wav.durationMs(bytes.size, mic.sampleRate)
+                if (sink != null) {
+                    // Not a note: the sound goes to the caller and is never filed.
+                    sink(wav, durationMs)
+                    record("announcement_recorded", arrayOf("to" to to, "durationMs" to durationMs.toString()))
+                } else {
+                    val note = store.add(to, from, wav, durationMs, toId, fromId)
+                    record("note_recorded", arrayOf("id" to note.id, "to" to to, "durationMs" to note.durationMs.toString(),
+                        "end" to (if (v == RecordingGate.Verdict.LIMIT) "limit" else if (v == null) "stopped" else "pause")))
+                }
             }
         } catch (e: Exception) {
             reason = "${e.javaClass.simpleName}: ${e.message}".take(120)

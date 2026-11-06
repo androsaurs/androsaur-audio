@@ -6,6 +6,8 @@ import dev.hram.androsaur.audio.command.CommandParser
 import dev.hram.androsaur.audio.command.Declension
 import dev.hram.androsaur.audio.command.QuickCommand
 import dev.hram.androsaur.audio.command.QuickCommands
+import dev.hram.androsaur.audio.command.Room
+import dev.hram.androsaur.audio.command.RoomParser
 import dev.hram.androsaur.audio.wake.PhraseMatcher
 import dev.hram.androsaur.audio.wake.WakePhrase
 import org.json.JSONObject
@@ -23,6 +25,8 @@ class CommandListener(
     private val recognizer: (grammarWords: List<String>) -> Recognizer,
     private val microphone: () -> MicrophoneListener?,
     private val recipients: RecipientBook,
+    private val rooms: RoomBook,
+    private val announcements: AnnouncementBox,
     private val speech: SpeechController,
     private val notes: NoteController,
     private val ringer: Ringer,
@@ -57,6 +61,11 @@ class CommandListener(
             Thread({ quick(quick) }, "command-run").start()
             return JSONObject().put("understood", true).put("command", name(quick))
         }
+        RoomParser(rooms.all()).parse(text)?.let { room ->
+            record("command_heard", arrayOf("text" to text.take(120), "understood" to "room:${room.id}"))
+            Thread({ carryOutRoom(room) }, "command-run").start()
+            return JSONObject().put("understood", true).put("room", room.id)
+        }
         val command = CommandParser(recipients.all()).parse(text)
         record("command_heard", arrayOf("text" to text.take(120), "understood" to (command?.recipient?.id ?: if (command != null) "no_recipient" else "none")))
         val result = JSONObject().put("understood", command != null)
@@ -70,7 +79,7 @@ class CommandListener(
         val phrase = wakePhrase()
         val wake = PhraseMatcher(phrase)
         val wakeWords = WakePhrase.grammarPhrases(phrase).flatMap { it.split(' ') }
-        val words = (CommandParser.vocabulary + QuickCommands.vocabulary + wakeWords + recipients.all().flatMap { r -> (listOf(r.id) + r.forms).flatMap { Declension.forms(it) } }).distinct()
+        val words = (CommandParser.vocabulary + QuickCommands.vocabulary + RoomParser.vocabulary(rooms.all()) + wakeWords + recipients.all().flatMap { r -> (listOf(r.id) + r.forms).flatMap { Declension.forms(it) } }).distinct()
         val rec = try { recognizer(words) } catch (e: Exception) { record("command_failed", arrayOf("reason" to "${e.javaClass.simpleName}: ${e.message}".take(120))); listening = false; return }
         val frames = LinkedBlockingQueue<ShortArray>(64)
         var verbSeen = false
@@ -103,6 +112,12 @@ class CommandListener(
                     record("command_heard", arrayOf("text" to text.take(120), "understood" to name(quick)))
                     mic.commandTap = null
                     quick(quick)
+                    return
+                }
+                RoomParser(rooms.all()).parse(text, verbSeen)?.let { room ->
+                    record("command_heard", arrayOf("text" to text.take(120), "understood" to "room:${room.id}"))
+                    mic.commandTap = null
+                    carryOutRoom(room)
                     return
                 }
                 val command = CommandParser(recipients.all()).parse(text, verbSeen)
@@ -190,6 +205,26 @@ class CommandListener(
             })
         }
         record(if (problem == null) "command_note" else "command_failed", arrayOf("to" to recipient.addressee) + (problem?.let { arrayOf("reason" to it) } ?: emptyArray()))
+        listening = false
+    }
+
+    /**
+     * «Передай в детскую»: says where it goes and records what is said. The sound is not a note: it waits in [announcements] and the
+     * main app takes it to the hub, which writes it out and has the speaker say it; the main app tells the result in words.
+     */
+    private fun carryOutRoom(room: Room) {
+        val who = person(); val whoId = personId()
+        speech.speakAndWait(if (room.id == RoomParser.ALL_ID) "На все колонки. Говорите." else "На колонку: ${room.name}. Говорите.")
+        var announceId: String? = null
+        val problem = notes.startRecording(room.name, who, null, beep = false, fromId = whoId, sink = { wav, _ -> announceId = announcements.add(wav) }) { reason ->
+            if (reason == null) record("command", arrayOf("intent" to "announce", "roomId" to room.id, "room" to room.name, "announceId" to announceId.orEmpty(), "personId" to whoId.orEmpty(), "person" to who.orEmpty()))
+            else speech.speakAndWait(when (reason) {
+                "no_speech" -> "Ничего не слышно. Сообщение не передано."
+                "too_short" -> "Слишком коротко. Сообщение не передано."
+                else -> "Не получилось записать."
+            })
+        }
+        record(if (problem == null) "command_announce" else "command_failed", arrayOf("to" to room.name) + (problem?.let { arrayOf("reason" to it) } ?: emptyArray()))
         listening = false
     }
 
