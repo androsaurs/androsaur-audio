@@ -180,6 +180,7 @@ class CommandListener(
             is QuickCommand.Accessory -> record("command", arrayOf("intent" to "character_accessory", "accessory" to command.accessory, "wear" to command.wear.toString(), "personId" to personId().orEmpty()))
             QuickCommand.Remember -> carryOutThing("remember", "Говорите.", 30)
             QuickCommand.Recall -> carryOutThing("find", "Что вспомнить?", 10)
+            QuickCommand.Forget -> carryOutThing("forget", "Что забыть?", 10)
         }
         listening = false
     }
@@ -190,7 +191,7 @@ class CommandListener(
         QuickCommand.RepeatNote -> "repeat_note"; is QuickCommand.Calc -> "calc"
         is QuickCommand.Glasses -> "character_glasses"
         is QuickCommand.Accessory -> "character_accessory"
-        QuickCommand.Remember -> "remember"; QuickCommand.Recall -> "find"
+        QuickCommand.Remember -> "remember"; QuickCommand.Recall -> "find"; QuickCommand.Forget -> "forget"
         is QuickCommand.Horoscope -> "horoscope"
     }
 

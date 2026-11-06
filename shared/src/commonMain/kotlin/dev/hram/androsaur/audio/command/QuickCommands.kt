@@ -23,6 +23,8 @@ sealed interface QuickCommand {
     data object Remember : QuickCommand
     /** «Вспомни» / «где лежит»: what is said next is what to look for. */
     data object Recall : QuickCommand
+    /** «Забудь»: what is said next names the one record the hub puts aside. */
+    data object Forget : QuickCommand
 }
 
 object QuickCommands {
@@ -36,6 +38,7 @@ object QuickCommands {
         // The thing and its place are free speech: the command only opens the recording, the hub makes sense of it.
         if (words.none { it in NOTE_VERBS }) {
             if (has("запомни") || has("запомните")) return QuickCommand.Remember
+            if (has("забудь") || has("забудьте")) return QuickCommand.Forget
             if (has("вспомни") || has("вспомните") || (has("где") && words.any { it in LIES })) return QuickCommand.Recall
         }
         // An explicit personal request; never consume the contents of a voice note.
@@ -102,7 +105,7 @@ object QuickCommands {
             "очки", "надень", "одень", "надевай", "одевай", "сними", "снимай", "убери", "пожалуйста", "ка",
             "бантик", "бант", "шарф", "шарфик", "венок", "цветочный", "семечка", "семечку", "семечко", "семечки",
             "шапка", "шапку", "шапочка", "шапочку", "колпак", "наушники", "кепка", "кепку", "толстовка", "толстовку", "худи",
-            "запомни", "запомните", "вспомни", "вспомните", "где", "лежит", "лежат", "находится", "находятся", "хранится", "хранятся",
+            "запомни", "запомните", "вспомни", "вспомните", "забудь", "забудьте", "где", "лежит", "лежат", "находится", "находятся", "хранится", "хранятся",
             "возьми", "дай", "отложи", "все", "аксессуар", "аксессуары", "украшение", "украшения",
         ) + Arithmetic.vocabulary + HOROSCOPE_WORDS).distinct()
 

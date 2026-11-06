@@ -54,6 +54,12 @@ class QuickCommandsTest {
         assertTrue(QuickCommands.vocabulary.containsAll(listOf("запомни", "вспомни", "где", "лежит", "лежат", "находится", "хранятся")))
     }
 
+    @Test fun forgettingIsACommandAndNeverPartOfANote() {
+        for (text in listOf("забудь", "забудьте пожалуйста", "пожалуйста забудь")) assertEquals(QuickCommand.Forget, p(text), text)
+        for (text in listOf("передай папе забудь", "передай маме забудь про это")) assertNotEquals(QuickCommand.Forget, p(text), text)
+        assertTrue(QuickCommands.vocabulary.containsAll(listOf("забудь", "забудьте")))
+    }
+
     @Test fun rememberingASumIsNotCalculatingIt() {
         // The whole phrase in one breath: it is a request to remember (what follows is lost; the fact is said after «Говорите.»).
         assertEquals(QuickCommand.Remember, p("запомни два плюс два равно пять"))
