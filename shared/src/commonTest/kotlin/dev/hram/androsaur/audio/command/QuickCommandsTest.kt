@@ -33,6 +33,18 @@ class QuickCommandsTest {
         assertTrue(QuickCommands.vocabulary.containsAll(listOf("бантик", "бант", "шарф", "шарфик", "венок", "возьми", "семечку", "все")))
     }
 
+    @Test fun penguinOutfitsAreCommands() {
+        for ((text, target) in listOf(
+            "надень шапку" to "bobble_hat", "надень шапочку" to "bobble_hat", "надень наушники" to "headphones",
+            "надень кепку" to "cap", "надень толстовку" to "hoodie", "надень худи" to "hoodie",
+        )) assertEquals(QuickCommand.Accessory(target, true), p(text), text)
+        for ((text, target) in listOf(
+            "сними шапку" to "bobble_hat", "сними наушники" to "headphones", "убери кепку" to "cap", "сними толстовку" to "hoodie",
+        )) assertEquals(QuickCommand.Accessory(target, false), p(text), text)
+        for (text in listOf("передай папе надень кепку", "не надевай наушники", "надень шапку и наушники")) assertNull(p(text), text)
+        assertTrue(QuickCommands.vocabulary.containsAll(listOf("шапку", "наушники", "кепку", "толстовку", "худи")))
+    }
+
     @Test fun glassesAreExplicitCommandsAndNotContentOfANote() {
         for (text in listOf("надень очки", "одень очки пожалуйста", "надевай очки"))
             assertEquals(QuickCommand.Glasses(true), p(text), text)
