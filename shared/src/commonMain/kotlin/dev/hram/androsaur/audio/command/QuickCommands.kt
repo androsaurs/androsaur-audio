@@ -8,6 +8,7 @@ package dev.hram.androsaur.audio.command
 sealed interface QuickCommand {
     data object Time : QuickCommand
     data class Weather(val tomorrow: Boolean) : QuickCommand
+    data class Horoscope(val tomorrow: Boolean = false) : QuickCommand
     /** A timer for [seconds]. */
     data class Timer(val seconds: Int) : QuickCommand
     data object TimerLeft : QuickCommand
@@ -28,6 +29,9 @@ object QuickCommands {
         val has = { w: String -> w in words }
         val starts = { p: String -> words.any { it.startsWith(p) } }
         if (words.any { it in STOP }) return QuickCommand.Stop
+        // An explicit personal request; never consume the contents of a voice note.
+        if ("гороскоп" in words && words.all { it in HOROSCOPE_WORDS })
+            return QuickCommand.Horoscope(tomorrow = has("завтра"))
         if (!has("не") && words.none { it in NOTE_VERBS }) {
             val targets = ACCESSORY_WORDS.filterValues { names -> words.any { it in names } }.keys
             val all = words.any { it in listOf("все", "аксессуар", "аксессуары", "украшение", "украшения") }
@@ -89,9 +93,10 @@ object QuickCommands {
             "очки", "надень", "одень", "надевай", "одевай", "сними", "снимай", "убери", "пожалуйста", "ка",
             "бантик", "бант", "шарф", "шарфик", "венок", "цветочный", "семечка", "семечку", "семечко", "семечки",
             "возьми", "дай", "отложи", "все", "аксессуар", "аксессуары", "украшение", "украшения",
-        ) + Arithmetic.vocabulary).distinct()
+        ) + Arithmetic.vocabulary + HOROSCOPE_WORDS).distinct()
 
     private const val MAX_SECONDS = 3 * 3600
+    private val HOROSCOPE_WORDS = setOf("гороскоп", "расскажи", "прочитай", "скажи", "мой", "мне", "какой", "на", "сегодня", "завтра", "пожалуйста")
     private val ACCESSORY_WORDS = mapOf(
         "glasses" to setOf("очки"), "bow" to setOf("бантик", "бант"),
         "scarf" to setOf("шарф", "шарфик"), "crown" to setOf("венок"),

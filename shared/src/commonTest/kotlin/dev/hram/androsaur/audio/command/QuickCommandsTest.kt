@@ -8,6 +8,15 @@ import kotlin.test.assertTrue
 class QuickCommandsTest {
     private fun p(text: String) = QuickCommands.parse(text)
 
+    @Test fun personalHoroscopeDoesNotConsumeNotesNegationsOrRequestsForOtherPeople() {
+        for (text in listOf("гороскоп", "расскажи мой гороскоп", "скажи мне гороскоп на сегодня", "прочитай гороскоп пожалуйста", "какой мой гороскоп"))
+            assertEquals(QuickCommand.Horoscope(), p(text), text)
+        assertEquals(QuickCommand.Horoscope(tomorrow = true), p("гороскоп на завтра"))
+        for (text in listOf("не рассказывай гороскоп", "передай маме гороскоп", "скажи маме мой гороскоп", "гороскоп для овна", "гороскоп на вчера"))
+            assertNull(p(text), text)
+        assertTrue(QuickCommands.vocabulary.containsAll(listOf("гороскоп", "расскажи", "прочитай", "мой")))
+    }
+
     @Test fun otherAccessoriesHaveExplicitTargetsAndOnlyOneCanBeRequested() {
         for ((text, target) in listOf(
             "надень бантик" to "bow", "одень бант" to "bow", "надень шарфик" to "scarf",

@@ -157,6 +157,7 @@ class CommandListener(
             }
             QuickCommand.Time -> record("command", arrayOf("intent" to "time"))
             is QuickCommand.Weather -> record("command", arrayOf("intent" to if (command.tomorrow) "weather_tomorrow" else "weather"))
+            is QuickCommand.Horoscope -> record("command", arrayOf("intent" to "horoscope", "tomorrow" to command.tomorrow.toString(), "personId" to personId().orEmpty()))
             is QuickCommand.Timer -> record("command", arrayOf("intent" to "timer", "seconds" to command.seconds.toString()))
             QuickCommand.TimerLeft -> record("command", arrayOf("intent" to "timer_left"))
             is QuickCommand.Calc -> record("command", arrayOf("intent" to "calc", "expression" to command.expression))
@@ -172,6 +173,7 @@ class CommandListener(
         QuickCommand.RepeatNote -> "repeat_note"; is QuickCommand.Calc -> "calc"
         is QuickCommand.Glasses -> "character_glasses"
         is QuickCommand.Accessory -> "character_accessory"
+        is QuickCommand.Horoscope -> "horoscope"
     }
 
     /** Says whom the note is for and starts recording it. */
