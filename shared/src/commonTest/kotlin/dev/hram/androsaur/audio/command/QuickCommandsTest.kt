@@ -2,6 +2,7 @@ package dev.hram.androsaur.audio.command
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -43,6 +44,27 @@ class QuickCommandsTest {
         )) assertEquals(QuickCommand.Accessory(target, false), p(text), text)
         for (text in listOf("передай папе надень кепку", "не надевай наушники", "надень шапку и наушники")) assertNull(p(text), text)
         assertTrue(QuickCommands.vocabulary.containsAll(listOf("шапку", "наушники", "кепку", "толстовку", "худи")))
+    }
+
+    @Test fun rememberingAndLookingForThings() {
+        for (text in listOf("запомни", "запомните пожалуйста", "пожалуйста запомни")) assertEquals(QuickCommand.Remember, p(text), text)
+        for (text in listOf("где лежит", "где лежат", "где находится", "где хранятся", "вспомни", "вспомните пожалуйста")) assertEquals(QuickCommand.Recall, p(text), text)
+        for (text in listOf("передай маме запомни", "передай папе где лежит", "где", "лежит", "какая погода")) assertNotEquals(QuickCommand.Remember, p(text), text)
+        for (text in listOf("передай папе где лежит", "передай маме вспомни", "где", "лежит")) assertNotEquals(QuickCommand.Recall, p(text), text)
+        assertTrue(QuickCommands.vocabulary.containsAll(listOf("запомни", "вспомни", "где", "лежит", "лежат", "находится", "хранятся")))
+    }
+
+    @Test fun rememberingASumIsNotCalculatingIt() {
+        // The whole phrase in one breath: it is a request to remember (what follows is lost; the fact is said after «Говорите.»).
+        assertEquals(QuickCommand.Remember, p("запомни два плюс два равно пять"))
+        // The same words without «запомни» are still arithmetic, and «вспомни» is a recall, not a calculation.
+        assertEquals(QuickCommand.Calc("2 + 2"), p("сколько будет два плюс два"))
+        assertEquals(QuickCommand.Recall, p("вспомни два плюс два"))
+    }
+
+    @Test fun rememberingAndRecallingAShoppingNote() {
+        assertEquals(QuickCommand.Remember, p("запомни купить батарейки"))
+        assertEquals(QuickCommand.Recall, p("вспомни что купить"))
     }
 
     @Test fun glassesAreExplicitCommandsAndNotContentOfANote() {

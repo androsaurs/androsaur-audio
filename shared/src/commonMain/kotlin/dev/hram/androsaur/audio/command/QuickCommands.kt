@@ -19,6 +19,10 @@ sealed interface QuickCommand {
     data class Calc(val expression: String) : QuickCommand
     data class Glasses(val wear: Boolean) : QuickCommand
     data class Accessory(val accessory: String, val wear: Boolean) : QuickCommand
+    /** «Запомни»: what is said next (where a thing lies, or any fact) is kept by the hub. */
+    data object Remember : QuickCommand
+    /** «Вспомни» / «где лежит»: what is said next is what to look for. */
+    data object Recall : QuickCommand
 }
 
 object QuickCommands {
@@ -29,6 +33,11 @@ object QuickCommands {
         val has = { w: String -> w in words }
         val starts = { p: String -> words.any { it.startsWith(p) } }
         if (words.any { it in STOP }) return QuickCommand.Stop
+        // The thing and its place are free speech: the command only opens the recording, the hub makes sense of it.
+        if (words.none { it in NOTE_VERBS }) {
+            if (has("запомни") || has("запомните")) return QuickCommand.Remember
+            if (has("вспомни") || has("вспомните") || (has("где") && words.any { it in LIES })) return QuickCommand.Recall
+        }
         // An explicit personal request; never consume the contents of a voice note.
         if ("гороскоп" in words && words.all { it in HOROSCOPE_WORDS })
             return QuickCommand.Horoscope(tomorrow = has("завтра"))
@@ -93,6 +102,7 @@ object QuickCommands {
             "очки", "надень", "одень", "надевай", "одевай", "сними", "снимай", "убери", "пожалуйста", "ка",
             "бантик", "бант", "шарф", "шарфик", "венок", "цветочный", "семечка", "семечку", "семечко", "семечки",
             "шапка", "шапку", "шапочка", "шапочку", "колпак", "наушники", "кепка", "кепку", "толстовка", "толстовку", "худи",
+            "запомни", "запомните", "вспомни", "вспомните", "где", "лежит", "лежат", "находится", "находятся", "хранится", "хранятся",
             "возьми", "дай", "отложи", "все", "аксессуар", "аксессуары", "украшение", "украшения",
         ) + Arithmetic.vocabulary + HOROSCOPE_WORDS).distinct()
 
@@ -107,6 +117,7 @@ object QuickCommands {
         "cap" to setOf("кепка", "кепку"),
         "hoodie" to setOf("толстовка", "толстовку", "худи"),
     )
+    private val LIES = setOf("лежит", "лежат", "находится", "находятся", "хранится", "хранятся")
     private val STOP = setOf("стоп", "хватит", "отмена", "отмени", "замолчи", "тихо", "выключи", "останови", "остановить", "отключи", "сбрось")
     private val NOTE_VERBS = setOf("передай", "передайте", "скажи", "скажите", "запиши", "запишите", "оставь", "оставьте", "отправь", "отправьте", "напиши", "напишите")
     private val NUMBERS: Map<String, Double> = mapOf(

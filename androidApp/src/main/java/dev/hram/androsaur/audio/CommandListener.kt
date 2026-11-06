@@ -178,6 +178,8 @@ class CommandListener(
             is QuickCommand.Calc -> record("command", arrayOf("intent" to "calc", "expression" to command.expression))
             is QuickCommand.Glasses -> record("command", arrayOf("intent" to "character_glasses", "wear" to command.wear.toString(), "personId" to personId().orEmpty()))
             is QuickCommand.Accessory -> record("command", arrayOf("intent" to "character_accessory", "accessory" to command.accessory, "wear" to command.wear.toString(), "personId" to personId().orEmpty()))
+            QuickCommand.Remember -> carryOutThing("remember", "Говорите.", 30)
+            QuickCommand.Recall -> carryOutThing("find", "Что вспомнить?", 10)
         }
         listening = false
     }
@@ -188,6 +190,7 @@ class CommandListener(
         QuickCommand.RepeatNote -> "repeat_note"; is QuickCommand.Calc -> "calc"
         is QuickCommand.Glasses -> "character_glasses"
         is QuickCommand.Accessory -> "character_accessory"
+        QuickCommand.Remember -> "remember"; QuickCommand.Recall -> "find"
         is QuickCommand.Horoscope -> "horoscope"
     }
 
@@ -213,18 +216,30 @@ class CommandListener(
      * main app takes it to the hub, which writes it out and has the speaker say it; the main app tells the result in words.
      */
     private fun carryOutRoom(room: Room) {
+        val prompt = if (room.id == RoomParser.ALL_ID) "На все колонки. Говорите." else "На колонку: ${room.name}. Говорите."
+        recordForHub(prompt, room.name, "announce", 60, " Сообщение не передано.", arrayOf("roomId" to room.id, "room" to room.name))
+    }
+
+    /**
+     * «Запомни» / «Где лежит»: says what to do and records what is said. Like a message for a speaker, the sound is not a note: the
+     * main app takes it to the hub, which makes sense of it (what lies where, or what is looked for) and the main app tells the result.
+     */
+    private fun carryOutThing(intent: String, prompt: String, seconds: Int) =
+        recordForHub(prompt, "вещи", intent, seconds, if (intent == "remember") " Не запомнил." else "", emptyArray())
+
+    private fun recordForHub(prompt: String, label: String, intent: String, seconds: Int, failed: String, extra: Array<Pair<String, String>>) {
         val who = person(); val whoId = personId()
-        speech.speakAndWait(if (room.id == RoomParser.ALL_ID) "На все колонки. Говорите." else "На колонку: ${room.name}. Говорите.")
+        speech.speakAndWait(prompt)
         var announceId: String? = null
-        val problem = notes.startRecording(room.name, who, null, beep = false, fromId = whoId, sink = { wav, _ -> announceId = announcements.add(wav) }) { reason ->
-            if (reason == null) record("command", arrayOf("intent" to "announce", "roomId" to room.id, "room" to room.name, "announceId" to announceId.orEmpty(), "personId" to whoId.orEmpty(), "person" to who.orEmpty()))
+        val problem = notes.startRecording(label, who, seconds, beep = false, fromId = whoId, sink = { wav, _ -> announceId = announcements.add(wav) }) { reason ->
+            if (reason == null) record("command", arrayOf("intent" to intent, "announceId" to announceId.orEmpty(), "personId" to whoId.orEmpty(), "person" to who.orEmpty()) + extra)
             else speech.speakAndWait(when (reason) {
-                "no_speech" -> "Ничего не слышно. Сообщение не передано."
-                "too_short" -> "Слишком коротко. Сообщение не передано."
+                "no_speech" -> "Ничего не слышно.$failed"
+                "too_short" -> "Слишком коротко.$failed"
                 else -> "Не получилось записать."
             })
         }
-        record(if (problem == null) "command_announce" else "command_failed", arrayOf("to" to room.name) + (problem?.let { arrayOf("reason" to it) } ?: emptyArray()))
+        record(if (problem == null) "command_$intent" else "command_failed", arrayOf("to" to label) + (problem?.let { arrayOf("reason" to it) } ?: emptyArray()))
         listening = false
     }
 
