@@ -151,4 +151,12 @@ class QuickCommandsTest {
         assertEquals(QuickCommand.Stop, p("сбрось таймер"))
         assertEquals(QuickCommand.Stop, p("стоп"))
     }
+
+    @Test fun takenIsAConfirmationAndNeverPartOfANote() {
+        for (text in listOf("принял", "приняла", "я принял лекарство", "принял таблетки", "выпила лекарство"))
+            assertEquals(QuickCommand.Taken, p(text), text)
+        assertNull(p("передай маме что я принял лекарство"))
+        assertNotEquals(QuickCommand.Taken, p("стоп"))
+        assertNotEquals(QuickCommand.Taken, p("включи свет"))
+    }
 }

@@ -180,6 +180,12 @@ class CommandListener(
             is QuickCommand.Calc -> record("command", arrayOf("intent" to "calc", "expression" to command.expression))
             is QuickCommand.Glasses -> record("command", arrayOf("intent" to "character_glasses", "wear" to command.wear.toString(), "personId" to personId().orEmpty()))
             is QuickCommand.Accessory -> record("command", arrayOf("intent" to "character_accessory", "accessory" to command.accessory, "wear" to command.wear.toString(), "personId" to personId().orEmpty()))
+            QuickCommand.Taken -> {
+                // The main app knows the reminder and the schedule; here only who says it matters: without a person in front of the camera it is nobody's.
+                val who = personId()
+                if (who == null) speech.speakAndWait("Не вижу, кто принял.")
+                else record("command", arrayOf("intent" to "medication_taken", "personId" to who))
+            }
             QuickCommand.Remember -> carryOutThing("remember", "Говорите.", 30)
             QuickCommand.Recall -> carryOutThing("find", "Что вспомнить?", 10)
             QuickCommand.Forget -> carryOutThing("forget", "Что забыть?", 10)
@@ -194,6 +200,7 @@ class CommandListener(
         is QuickCommand.Glasses -> "character_glasses"
         is QuickCommand.Accessory -> "character_accessory"
         QuickCommand.Remember -> "remember"; QuickCommand.Recall -> "find"; QuickCommand.Forget -> "forget"
+        QuickCommand.Taken -> "medication_taken"
         is QuickCommand.Horoscope -> "horoscope"
     }
 
