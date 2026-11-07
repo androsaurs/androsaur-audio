@@ -72,7 +72,7 @@ object BenchTrigger {
                         if (text.isNotBlank()) speech.speakAndWait(text)?.let { Log.i(TAG, "$tag ERROR $it"); return@Thread }
                         else Thread.sleep(2000)
                         val done = java.util.concurrent.CountDownLatch(1)
-                        val err = notes.startRecording(".", null, 3, beep = false, sink = { _, _ -> }) { done.countDown() }
+                        val err = notes.startRecording(".", null, if (during.isNotBlank()) 15 else 3, beep = false, sink = { _, _ -> }) { done.countDown() }
                         if (err != null) { Log.i(TAG, "$tag ERROR $err"); return@Thread }
                         // A stand-in for the person: the phone says this while it listens (its own speaker is loud in its microphone).
                         if (during.isNotBlank()) { Thread.sleep(1200); speech.speak(during) }

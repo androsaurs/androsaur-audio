@@ -83,6 +83,7 @@ class RecordingGate(
     private var lastSpeechAtMs = 0.0
     private var firstSpeechAtMs = 0.0
     private var spoke = false
+    private var speechPeakDbfs = -120.0
     /** The loudest frame so far, for diagnosing a failed recording. */
     var peakDbfs = -120.0; private set
     /** The noise level estimate (see the class comment), NaN before the first frame. */
@@ -111,7 +112,11 @@ class RecordingGate(
         val sorted = sortedWindow()
         val estimate = if (frames <= CALIBRATION_FRAMES) sorted[sorted.size / 2] else sorted[((sorted.size - 1) * NOISE_QUANTILE).toInt()]
         floorDbfs = if (floorDbfs.isNaN() || !spoke) estimate else minOf(floorDbfs, estimate)
-        val loud = frames > CALIBRATION_FRAMES && dbfs > thresholdDbfs
+        // The start needs only the room threshold, but once the person is talking a frame counts as speech only if it is not far below
+        // the speech itself: a lower threshold must not let the noises of the room keep stretching the pause that ends the message.
+        val level = if (spoke) maxOf(thresholdDbfs, speechPeakDbfs - END_BELOW_PEAK_DB) else thresholdDbfs
+        val loud = frames > CALIBRATION_FRAMES && dbfs > level
+        if (loud && dbfs > speechPeakDbfs) speechPeakDbfs = dbfs
         if (loud) {
             if (run == 0) runStartMs = elapsedMs - frameMs
             run++
@@ -138,6 +143,8 @@ class RecordingGate(
         /** Speech begins after this long a run of frames above the threshold. */
         const val START_MS = 90.0
         const val MARGIN_DB = 12.0
+        /** After the start, frames more than this far below the loudest speech frame are not speech (they do not extend the message). */
+        const val END_BELOW_PEAK_DB = 20.0
         /** The phone microphone is quiet: ordinary speech at arm's length is about -50 dBFS, the room about -75. */
         const val MIN_THRESHOLD_DBFS = -62.0
     }

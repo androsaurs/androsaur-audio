@@ -259,7 +259,15 @@ class AudioService : Service() {
                     wakeGain = prefs.getBoolean(KEY_WAKE_GAIN, false),
                     keepUtterances = ::debugOn,
                 ).also { it.start() }
-                if (ready != null) record("engine_ready", "engine" to wanted.id, "loadMs" to tookMs.toString())
+                if (ready != null) {
+                    record("engine_ready", "engine" to wanted.id, "loadMs" to tookMs.toString())
+                    // The command recognizer needs the speech model, which a wake-word engine does not load: load it now, not at the first command.
+                    val began = android.os.SystemClock.elapsedRealtime()
+                    runCatching { factory.warmUp() }
+                    val modelMs = android.os.SystemClock.elapsedRealtime() - began
+                    record("command_model_ready", "loadMs" to modelMs.toString())
+                    Log.i(TAG, "command model loaded in $modelMs ms")
+                }
             }
         }, "engine-load").start()
     }

@@ -137,4 +137,14 @@ class NotesTest {
         assertEquals(false, gate.hasSpeech)
         assertEquals(RecordingGate.Verdict.NO_SPEECH, feed(gate, List(200) { -70.0 }))
     }
+
+    @Test fun noisesOfTheRoomDoNotStretchTheEndOfAMessage() {
+        // frames of 32 ms: the room at -72 with a blip at -55 every half second (above the threshold -60, far below the voice at -25)
+        val gate = RecordingGate(32.0)
+        val room = List(60) { -72.0 }
+        val voice = List(40) { -25.0 }
+        val noisy = (0 until 200).map { if (it % 16 == 0) -55.0 else -72.0 }
+        assertEquals(RecordingGate.Verdict.DONE, feed(gate, room + voice + noisy))
+        assertTrue(gate.recordedMs < 60 * 32 + 40 * 32 + 1700 + 32, "${gate.recordedMs}")
+    }
 }

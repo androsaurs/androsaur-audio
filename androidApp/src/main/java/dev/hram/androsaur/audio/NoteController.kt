@@ -101,7 +101,8 @@ class NoteController(
             peakText = Math.round(gate.peakDbfs).toString(); thresholdText = Math.round(gate.thresholdDbfs).toString()
             // Levels only, never words: why a recording ended or was rejected (a threshold raised by the sound of the phone's own speech shows here).
             val gateData = arrayOf("floorDbfs" to Math.round(gate.noiseFloorDbfs).toString(), "thresholdDbfs" to thresholdText, "peakDbfs" to peakText,
-                "speechMs" to gate.speechTotalMs.toString(), "recordedMs" to gate.recordedMs.toString())
+                "speechMs" to gate.speechTotalMs.toString(), "recordedMs" to gate.recordedMs.toString(),
+                "speechStartMs" to gate.speechStartMs.toString(), "speechEndMs" to gate.speechEndMs.toString())
             record("record_gate", gateData)
             android.util.Log.i("RecGate", gateData.joinToString(" ") { "${it.first}=${it.second}" } + " frameMs=${mic.frameMs.toInt()} first=" + firstLevels.joinToString(","))
             val v = verdict[0]
