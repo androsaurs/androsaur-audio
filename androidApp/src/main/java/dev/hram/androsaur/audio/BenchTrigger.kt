@@ -18,6 +18,19 @@ import android.util.Log
  * it has spoken (extras: `text` (blank: no phrase, the control), `repeat`, `engine`, `tag`, `during`: a phrase the phone says 1.2 s into the listening as a stand-in for a person). Stay silent while it runs.
  * Extras of SPEECH_BENCH: `threads` (int, saved as the setting), `engine` (id), `play` (bool: also say the phrases), `tag` (label for the lines).
  */
+/**
+ * What the command recognizer made of each phrase, written to logcat (tag `CommandText`) for a few minutes after
+ * `adb shell am broadcast -a dev.hram.androsaur.audio.COMMAND_TRACE --ei minutes 10`. It holds words, so it is off by default,
+ * never leaves the phone by itself and ends on its own. Read it with `adb logcat -d -s CommandText`.
+ */
+object CommandTrace {
+    const val ACTION = "dev.hram.androsaur.audio.COMMAND_TRACE"
+    @Volatile private var until = 0L
+    fun on(): Boolean = android.os.SystemClock.elapsedRealtime() < until
+    fun start(minutes: Int) { until = android.os.SystemClock.elapsedRealtime() + minutes.coerceIn(0, 60) * 60_000L }
+    fun log(what: String) { if (on()) Log.i("CommandText", what) }
+}
+
 object BenchTrigger {
     const val ACTION = "dev.hram.androsaur.audio.SPEECH_BENCH"
     const val ACTION_SAY = "dev.hram.androsaur.audio.SPEECH_SAY"
@@ -58,6 +71,9 @@ object BenchTrigger {
                 }, "speech-say-trigger").start()
             }
         }
+        context.registerReceiver(object : BroadcastReceiver() {
+            override fun onReceive(c: Context, intent: Intent) { CommandTrace.start(intent.getIntExtra("minutes", 10)) }
+        }, IntentFilter(CommandTrace.ACTION), "android.permission.DUMP", null, Context.RECEIVER_EXPORTED)
         val listenReceiver = object : BroadcastReceiver() {
             override fun onReceive(c: Context, intent: Intent) {
                 val text = intent.getStringExtra("text") ?: "Что вспомнить?"

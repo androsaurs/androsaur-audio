@@ -25,7 +25,7 @@ class EngineFactory(private val context: Context) {
 
     /** A speech recognizer limited to [grammarWords] over the shared model, for commands after the wake word. Creation takes a moment: call off the capture thread. */
     fun commandRecognizer(grammarWords: List<String>): org.vosk.Recognizer =
-        org.vosk.Recognizer(vosk.model(), 16_000f, org.json.JSONArray(grammarWords + "[unk]").toString())
+        org.vosk.Recognizer(vosk.model(), 16_000f, org.json.JSONArray(grammarWords + "[unk]").toString()).also { it.setWords(true) }
 
     /** Engines offered to the user, as setting strings. */
     fun available(): List<String> =

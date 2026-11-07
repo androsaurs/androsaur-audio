@@ -142,4 +142,13 @@ class QuickCommandsTest {
         for (w in listOf("таймер", "который", "погода", "завтра", "стоп", "полчаса", "двадцать", "записку", "повтори")) assertTrue(w in words, w)
     }
 
+
+    @Test fun switchingVerbsAloneAreNotAStop() {
+        for (text in listOf("выключи", "отключи", "сбрось", "выключи свет", "включи свет", "отключи свет", "выключи семьдесят"))
+            assertNull(p(text), text)
+        assertEquals(QuickCommand.Stop, p("выключи таймер"))
+        assertEquals(QuickCommand.Stop, p("отключи таймер"))
+        assertEquals(QuickCommand.Stop, p("сбрось таймер"))
+        assertEquals(QuickCommand.Stop, p("стоп"))
+    }
 }

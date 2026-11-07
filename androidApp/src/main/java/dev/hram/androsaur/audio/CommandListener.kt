@@ -97,7 +97,9 @@ class CommandListener(
                 peak = maxOf(peak, dev.hram.androsaur.audio.level.AudioLevel.dbfs(raw))
                 val frame = gain.apply(raw)
                 val final = rec.acceptWaveForm(frame, frame.size)
-                val heard = if (final) JSONObject(rec.result).optString("text") else JSONObject(rec.partialResult).optString("partial")
+                val finalJson = if (final) rec.result else null
+                if (finalJson != null) CommandTrace.log(finalJson.replace(Regex("\\s+"), " "))
+                val heard = if (finalJson != null) JSONObject(finalJson).optString("text") else JSONObject(rec.partialResult).optString("partial")
                 if (wake.matches(heard)) {
                     record("command_rewake", arrayOf("text" to heard.take(120)))
                     rewake = heard

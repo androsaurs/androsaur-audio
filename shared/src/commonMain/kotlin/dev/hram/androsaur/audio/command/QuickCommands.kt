@@ -34,7 +34,8 @@ object QuickCommands {
         if (words.isEmpty()) return null
         val has = { w: String -> w in words }
         val starts = { p: String -> words.any { it.startsWith(p) } }
-        if (words.any { it in STOP }) return QuickCommand.Stop
+        // «Выключи», «отключи», «сбрось» alone are not a stop: a recognizer limited to command words hears «включи свет» as «выключи».
+        if (words.any { it in STOP } || (words.any { it in STOP_WITH_OBJECT } && words.any { it in STOP_OBJECTS })) return QuickCommand.Stop
         // The thing and its place are free speech: the command only opens the recording, the hub makes sense of it.
         if (words.none { it in NOTE_VERBS }) {
             if (has("запомни") || has("запомните")) return QuickCommand.Remember
@@ -96,7 +97,9 @@ object QuickCommands {
 
     /** All the words these commands are made of, for a recognizer limited to a list of words. */
     val vocabulary: List<String> get() =
-        (STOP + NOTE_VERBS + NUMBERS.keys + listOf(
+        (STOP + STOP_WITH_OBJECT + NOTE_VERBS + NUMBERS.keys + listOf(
+            // Known but not commands (yet): so the recognizer writes what was said instead of forcing it into «выключи» (a stop).
+            "включи", "свет",
             "таймер", "таймера", "на", "поставь", "заведи", "засеки", "минут", "минуту", "минуты", "секунд", "секунду", "секунды",
             "час", "часа", "часов", "полчаса", "полминуты", "осталось", "сколько", "который", "времени", "время", "какое", "сейчас",
             "погода", "погоду", "погоды", "погодой", "прогноз", "какая", "завтра", "сегодня", "что", "с", "есть", "мне", "меня", "у",
@@ -121,7 +124,10 @@ object QuickCommands {
         "hoodie" to setOf("толстовка", "толстовку", "худи"),
     )
     private val LIES = setOf("лежит", "лежат", "находится", "находятся", "хранится", "хранятся")
-    private val STOP = setOf("стоп", "хватит", "отмена", "отмени", "замолчи", "тихо", "выключи", "останови", "остановить", "отключи", "сбрось")
+    private val STOP = setOf("стоп", "хватит", "отмена", "отмени", "замолчи", "тихо", "останови", "остановить")
+    /** Verbs that stop something only when they name it («выключи таймер»); alone they are a different command (the light, later). */
+    private val STOP_WITH_OBJECT = setOf("выключи", "отключи", "сбрось")
+    private val STOP_OBJECTS = setOf("таймер", "таймера")
     private val NOTE_VERBS = setOf("передай", "передайте", "скажи", "скажите", "запиши", "запишите", "оставь", "оставьте", "отправь", "отправьте", "напиши", "напишите")
     private val NUMBERS: Map<String, Double> = mapOf(
         "один" to 1.0, "одна" to 1.0, "одну" to 1.0, "два" to 2.0, "две" to 2.0, "три" to 3.0, "четыре" to 4.0, "пять" to 5.0,
