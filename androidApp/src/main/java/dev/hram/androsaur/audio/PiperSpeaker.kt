@@ -10,6 +10,7 @@ import com.k2fsa.sherpa.onnx.OfflineTtsConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsVitsModelConfig
 import dev.hram.androsaur.audio.speech.MouthEnvelope
+import dev.hram.androsaur.audio.speech.SpeechSplit
 import dev.hram.androsaur.audio.speech.SpeechTiming
 import java.io.File
 
@@ -54,18 +55,21 @@ class PiperSpeaker(private val context: Context, private val voice: String, thre
         try {
             track.play()
             ticker.start()
-            tts.generateWithCallback(text, 0, speed) { chunk ->
-                if (stopped) return@generateWithCallback 0
-                if (firstAudioMs == 0L) firstAudioMs = SystemClock.elapsedRealtime() - began
-                envelope.add(chunk)
-                var offset = 0
-                while (offset < chunk.size && !stopped) {
-                    val n = track.write(chunk, offset, chunk.size - offset, AudioTrack.WRITE_NON_BLOCKING)
-                    if (n < 0) { stopped = true; break }
-                    if (n == 0) Thread.sleep(5) else offset += n
+            for (piece in SpeechSplit.pieces(text).ifEmpty { listOf(text) }) {
+                if (stopped) break
+                tts.generateWithCallback(piece, 0, speed) { chunk ->
+                    if (stopped) return@generateWithCallback 0
+                    if (firstAudioMs == 0L) firstAudioMs = SystemClock.elapsedRealtime() - began
+                    envelope.add(chunk)
+                    var offset = 0
+                    while (offset < chunk.size && !stopped) {
+                        val n = track.write(chunk, offset, chunk.size - offset, AudioTrack.WRITE_NON_BLOCKING)
+                        if (n < 0) { stopped = true; break }
+                        if (n == 0) Thread.sleep(5) else offset += n
+                    }
+                    written += chunk.size
+                    if (stopped) 0 else 1
                 }
-                written += chunk.size
-                if (stopped) 0 else 1
             }
             val synthMs = SystemClock.elapsedRealtime() - began
             // A stream track starts playing only when its buffer is full: a phrase shorter than the buffer («Кому?») never sounded

@@ -77,4 +77,19 @@ class SpeechTest {
         header[0] = 'X'.code.toByte()
         assertNull(WavInfo.durationMs(header, 100))
     }
+
+    @Test fun aLongFirstSentenceIsCutAtItsFirstComma() {
+        assertEquals(listOf("Нашёл,", "ключи лежат в верхнем ящике."), SpeechSplit.pieces("Нашёл, ключи лежат в верхнем ящике."))
+    }
+
+    @Test fun shortSentencesAndLaterSentencesAreKeptWhole() {
+        assertEquals(listOf("Привет, как дела?"), SpeechSplit.pieces("Привет, как дела?"))
+        assertEquals(listOf("Хорошо.", "Запомнил, что ключи лежат в ящике на кухне."), SpeechSplit.pieces("Хорошо. Запомнил, что ключи лежат в ящике на кухне."))
+        assertEquals(listOf("Ключи лежат в верхнем ящике на кухне"), SpeechSplit.pieces("Ключи лежат в верхнем ящике на кухне"))
+    }
+
+    @Test fun nothingToSayGivesNoPieces() {
+        assertEquals(emptyList(), SpeechSplit.pieces(""))
+        assertEquals(emptyList(), SpeechSplit.pieces(" ... !? "))
+    }
 }
