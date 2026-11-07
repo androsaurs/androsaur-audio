@@ -78,11 +78,13 @@ class NoteController(
             // The beep and its tail die out before the recorder listens, so they are not in the note.
             Thread.sleep(BEEP_TAIL_MS)
             val gate = RecordingGate(mic.frameMs, maxMs = limitMs)
+            val firstLevels = ArrayList<Int>()   // levels of the first frames, for the log (numbers only)
             val pcm = ByteArrayOutputStream()
             val verdict = arrayOfNulls<RecordingGate.Verdict>(1)
             val finished = CountDownLatch(1)
             mic.tap = { frame ->
                 if (verdict[0] == null) {
+                    if (firstLevels.size < 50) firstLevels.add(Math.round(Wav.level(frame)).toInt())
                     val v = gate.onFrame(Wav.level(frame))
                     val bytes = ByteArray(frame.size * 2)
                     for (i in frame.indices) { bytes[2 * i] = frame[i].toByte(); bytes[2 * i + 1] = (frame[i].toInt() shr 8).toByte() }
@@ -97,6 +99,11 @@ class NoteController(
                 }
             } finally { mic.tap = null }
             peakText = Math.round(gate.peakDbfs).toString(); thresholdText = Math.round(gate.thresholdDbfs).toString()
+            // Levels only, never words: why a recording ended or was rejected (a threshold raised by the sound of the phone's own speech shows here).
+            val gateData = arrayOf("floorDbfs" to Math.round(gate.noiseFloorDbfs).toString(), "thresholdDbfs" to thresholdText, "peakDbfs" to peakText,
+                "speechMs" to gate.speechTotalMs.toString(), "recordedMs" to gate.recordedMs.toString())
+            record("record_gate", gateData)
+            android.util.Log.i("RecGate", gateData.joinToString(" ") { "${it.first}=${it.second}" } + " frameMs=${mic.frameMs.toInt()} first=" + firstLevels.joinToString(","))
             val v = verdict[0]
             when {
                 reason != null -> {}

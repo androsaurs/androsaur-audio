@@ -58,7 +58,10 @@ object NoteBook {
 
 /**
  * Decides when a spoken message is over, from the level of each audio frame: it waits for the speech to begin, then ends the
- * message after a pause. The speech threshold follows the noise of the room (measured over the first frames).
+ * message after a pause. The speech threshold follows the noise of the room. The noise level is the median of the first frames and
+ * then a low quantile of the last second (so a click, a step or the tail of the phone's own voice does not raise the threshold the
+ * way the loudest frame did); once speech has begun it can only go down. Speech begins after a short run of loud frames, so a one-frame
+ * spike neither starts a recording nor ends it as «too short».
  */
 class RecordingGate(
     private val frameMs: Double,
@@ -70,33 +73,51 @@ class RecordingGate(
 
     private var elapsedMs = 0.0
     private var floorDbfs = Double.NaN
-    private var calibratedFrames = 0
+    private var frames = 0
+    private val window = ArrayDeque<Double>()
+    private val windowSize = maxOf(CALIBRATION_FRAMES, kotlin.math.ceil(NOISE_WINDOW_MS / frameMs).toInt())
+    private val startFrames = maxOf(1, kotlin.math.ceil(START_MS / frameMs).toInt())
+    private var run = 0
+    private var runStartMs = 0.0
     private var speechMs = 0.0
     private var lastSpeechAtMs = 0.0
     private var firstSpeechAtMs = 0.0
     private var spoke = false
     /** The loudest frame so far, for diagnosing a failed recording. */
     var peakDbfs = -120.0; private set
+    /** The noise level estimate (see the class comment), NaN before the first frame. */
+    val noiseFloorDbfs: Double get() = floorDbfs
+    /** Milliseconds of speech frames so far. */
+    val speechTotalMs: Long get() = speechMs.toLong()
     /** Level above which a frame counts as speech. */
     val thresholdDbfs: Double get() = if (floorDbfs.isNaN()) MIN_THRESHOLD_DBFS else maxOf(MIN_THRESHOLD_DBFS, floorDbfs + MARGIN_DB)
     val recordedMs: Long get() = elapsedMs.toLong()
     /** Time of the first and the last speech frame, in ms from the start of the recording; -1 before any speech. */
     val speechStartMs: Long get() = if (spoke) firstSpeechAtMs.toLong() else -1
     val speechEndMs: Long get() = if (spoke) lastSpeechAtMs.toLong() else -1
-    /** True once a loud enough frame was heard. */
+    /** True once speech has begun. */
     val hasSpeech: Boolean get() = spoke
     /** Whether the heard speech is long enough to keep. */
     val longEnough: Boolean get() = speechMs >= MIN_SPEECH_MS
 
+    private fun sortedWindow(): List<Double> = window.sorted()
+
     fun onFrame(dbfs: Double): Verdict {
         elapsedMs += frameMs
+        frames++
         if (dbfs > peakDbfs) peakDbfs = dbfs
-        if (calibratedFrames < CALIBRATION_FRAMES) {
-            calibratedFrames++
-            floorDbfs = if (floorDbfs.isNaN()) dbfs else maxOf(floorDbfs, dbfs)
-        }
-        val loud = calibratedFrames >= CALIBRATION_FRAMES && dbfs > thresholdDbfs
-        if (loud) { if (!spoke) firstSpeechAtMs = elapsedMs - frameMs; spoke = true; speechMs += frameMs; lastSpeechAtMs = elapsedMs }
+        window.addLast(dbfs)
+        if (window.size > windowSize) window.removeFirst()
+        val sorted = sortedWindow()
+        val estimate = if (frames <= CALIBRATION_FRAMES) sorted[sorted.size / 2] else sorted[((sorted.size - 1) * NOISE_QUANTILE).toInt()]
+        floorDbfs = if (floorDbfs.isNaN() || !spoke) estimate else minOf(floorDbfs, estimate)
+        val loud = frames > CALIBRATION_FRAMES && dbfs > thresholdDbfs
+        if (loud) {
+            if (run == 0) runStartMs = elapsedMs - frameMs
+            run++
+            if (spoke) { speechMs += frameMs; lastSpeechAtMs = elapsedMs }
+            else if (run >= startFrames) { spoke = true; firstSpeechAtMs = runStartMs; speechMs += run * frameMs; lastSpeechAtMs = elapsedMs }
+        } else run = 0
         return when {
             spoke && elapsedMs - lastSpeechAtMs >= endPauseMs -> if (speechMs < MIN_SPEECH_MS) Verdict.TOO_SHORT else Verdict.DONE
             elapsedMs >= maxMs -> if (spoke) Verdict.LIMIT else Verdict.NO_SPEECH
@@ -111,6 +132,11 @@ class RecordingGate(
         const val END_PAUSE_MS = 1_500L
         const val MIN_SPEECH_MS = 300.0
         const val CALIBRATION_FRAMES = 6
+        /** The noise is estimated over this much of the latest sound, at the quantile below (a low one: speech and clicks are above it). */
+        const val NOISE_WINDOW_MS = 1000.0
+        const val NOISE_QUANTILE = 0.2
+        /** Speech begins after this long a run of frames above the threshold. */
+        const val START_MS = 90.0
         const val MARGIN_DB = 12.0
         /** The phone microphone is quiet: ordinary speech at arm's length is about -50 dBFS, the room about -75. */
         const val MIN_THRESHOLD_DBFS = -62.0

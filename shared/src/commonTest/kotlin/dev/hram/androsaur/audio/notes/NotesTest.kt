@@ -113,4 +113,28 @@ class NotesTest {
         assertEquals(1000L, Wav.durationMs(32000, 16000))
         assertEquals((36 + 32000 and 0xFF).toByte(), h[4])
     }
+
+    @Test fun aSpikeInTheFirstFramesDoesNotRaiseTheThreshold() {
+        val gate = RecordingGate(100.0)
+        feed(gate, listOf(-75.0, -75.0, -75.0, -30.0, -75.0, -75.0))
+        assertEquals(-62.0, gate.thresholdDbfs)
+        assertEquals(RecordingGate.Verdict.DONE, feed(gate, quiet(1000) + List(15) { -50.0 } + quiet(3000)))
+    }
+
+    @Test fun theTailOfTheOwnVoiceDiesOutAndTheThresholdFollowsTheRoom() {
+        // frames of 32 ms: 6 frames of the tail at -45, then the room at -70, then speech at -45
+        val gate = RecordingGate(32.0)
+        val levels = List(6) { -45.0 } + List(24) { -70.0 } + List(40) { -45.0 } + List(80) { -70.0 }
+        assertEquals(RecordingGate.Verdict.DONE, feed(gate, levels))
+        assertTrue(gate.thresholdDbfs <= -58.0, "${gate.thresholdDbfs}")
+        assertTrue(gate.longEnough)
+    }
+
+    @Test fun aShortSpikeIsNotTheStartOfSpeech() {
+        val gate = RecordingGate(32.0)
+        val levels = List(30) { -70.0 } + List(2) { -30.0 } + List(60) { -70.0 }
+        feed(gate, levels)
+        assertEquals(false, gate.hasSpeech)
+        assertEquals(RecordingGate.Verdict.NO_SPEECH, feed(gate, List(200) { -70.0 }))
+    }
 }

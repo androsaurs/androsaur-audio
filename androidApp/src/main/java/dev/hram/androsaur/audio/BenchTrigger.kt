@@ -13,14 +13,18 @@ import android.util.Log
  * `SPEECH_SAY` says a phrase through the real speech path (the one answers use) `repeat` times with `gap_ms` of silence before
  * each, and prints firstAudioMs / synthMs / audioMs per run (extras: `text`, `repeat`, `gap_ms`, `tag`, `threads`, `engine`: the speaker is saved as the setting): this is how the effect of
  * an idle processor (the first phrase after a pause) is measured, which the back-to-back benchmark hides.
+ * `SPEECH_LISTEN` says a phrase and then listens for 3 s exactly like a command that waits for an answer, and prints the recording
+ * gate (noise floor, threshold, peak; tag `RecGate`): in a quiet room the floor shows whether the phone hears its own voice after
+ * it has spoken (extras: `text` (blank: no phrase, the control), `repeat`, `engine`, `tag`, `during`: a phrase the phone says 1.2 s into the listening as a stand-in for a person). Stay silent while it runs.
  * Extras of SPEECH_BENCH: `threads` (int, saved as the setting), `engine` (id), `play` (bool: also say the phrases), `tag` (label for the lines).
  */
 object BenchTrigger {
     const val ACTION = "dev.hram.androsaur.audio.SPEECH_BENCH"
     const val ACTION_SAY = "dev.hram.androsaur.audio.SPEECH_SAY"
+    const val ACTION_LISTEN = "dev.hram.androsaur.audio.SPEECH_LISTEN"
     private const val TAG = "SpeechBench"
 
-    fun register(context: Context, speech: SpeechController) {
+    fun register(context: Context, speech: SpeechController, notes: NoteController) {
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(c: Context, intent: Intent) {
                 val threads = intent.getIntExtra("threads", 0)
@@ -54,6 +58,33 @@ object BenchTrigger {
                 }, "speech-say-trigger").start()
             }
         }
+        val listenReceiver = object : BroadcastReceiver() {
+            override fun onReceive(c: Context, intent: Intent) {
+                val text = intent.getStringExtra("text") ?: "Что вспомнить?"
+                val times = intent.getIntExtra("repeat", 1).coerceIn(1, 20)
+                val engine = intent.getStringExtra("engine")
+                val tag = intent.getStringExtra("tag") ?: "listen"
+                val during = intent.getStringExtra("during") ?: ""
+                Thread({
+                    if (engine != null) speech.configure(engine, null, null)?.let { Log.i(TAG, "$tag ERROR $it"); return@Thread }
+                    while (speech.status().optString("state") != "ready") Thread.sleep(200)
+                    for (n in 1..times) {
+                        if (text.isNotBlank()) speech.speakAndWait(text)?.let { Log.i(TAG, "$tag ERROR $it"); return@Thread }
+                        else Thread.sleep(2000)
+                        val done = java.util.concurrent.CountDownLatch(1)
+                        val err = notes.startRecording(".", null, 3, beep = false, sink = { _, _ -> }) { done.countDown() }
+                        if (err != null) { Log.i(TAG, "$tag ERROR $err"); return@Thread }
+                        // A stand-in for the person: the phone says this while it listens (its own speaker is loud in its microphone).
+                        if (during.isNotBlank()) { Thread.sleep(1200); speech.speak(during) }
+                        done.await(15, java.util.concurrent.TimeUnit.SECONDS)
+                        Log.i(TAG, "$tag LISTEN $n speaker=${speech.status().optString("speaker")}")
+                        Thread.sleep(1500)
+                    }
+                    Log.i(TAG, "$tag DONE")
+                }, "speech-listen-trigger").start()
+            }
+        }
+        context.registerReceiver(listenReceiver, IntentFilter(ACTION_LISTEN), "android.permission.DUMP", null, Context.RECEIVER_EXPORTED)
         context.registerReceiver(sayReceiver, IntentFilter(ACTION_SAY), "android.permission.DUMP", null, Context.RECEIVER_EXPORTED)
     }
 

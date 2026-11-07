@@ -101,7 +101,7 @@ class AudioService : Service() {
         record("service_started", "engine" to saved.id)
         activate(saved)
         speech.start()
-        BenchTrigger.register(this, speech)
+        BenchTrigger.register(this, speech, notes)
         server = PhoneServer(this, AccessToken.get(this)).also {
             try { it.start(); nsd.start(PhoneServer.PORT) }
             catch (e: java.io.IOException) { error = "http_port_busy"; Log.w(TAG, "cannot bind ${PhoneServer.PORT}", e) }
